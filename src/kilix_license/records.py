@@ -16,7 +16,9 @@ from kilix_license.digest import (
 )
 
 RECORD_SCHEMA = "kilix.license.record/v1"
-_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+# Entry ids use ollama-style colons (granite4.1:3b). Component slugs use [._:-].
+_ID = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
+_DECISION_CLASSES = frozenset({"affirmative", "informational"})
 
 
 def _require_id(value: Any, label: str) -> str:
@@ -158,9 +160,12 @@ class LicenseRecord:
     binding_conditions: tuple[BindingCondition, ...] = ()
     advisories: tuple[Advisory, ...] = ()
     statements: tuple[Statement, ...] = ()
+    determinations_sha256: str | None = None
+    decision_class: str | None = None
+    licence_ids: tuple[str, ...] = ()
 
     def to_jsonable(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "advisories": [item.to_jsonable() for item in self.advisories],
             "binding_conditions": [item.to_jsonable() for item in self.binding_conditions],
             "components": [item.to_jsonable() for item in self.components],
@@ -170,6 +175,13 @@ class LicenseRecord:
             "statements": [item.to_jsonable() for item in self.statements],
             "text_sha256": self.text_sha256,
         }
+        if self.decision_class is not None:
+            payload["decision_class"] = self.decision_class
+        if self.determinations_sha256 is not None:
+            payload["determinations_sha256"] = self.determinations_sha256
+        if self.licence_ids:
+            payload["licence_ids"] = list(self.licence_ids)
+        return payload
 
     def to_binding_jsonable(self) -> dict[str, Any]:
         """Licence-record payload that forms the OD-AI record digest.
@@ -184,7 +196,7 @@ class LicenseRecord:
         advisory keeps covers() and is recorded as receipt context the next
         time the screen is shown.
         """
-        return {
+        payload: dict[str, Any] = {
             "binding_conditions": [item.to_jsonable() for item in self.binding_conditions],
             "components": [
                 item.to_jsonable()
@@ -196,6 +208,11 @@ class LicenseRecord:
             "schema": RECORD_SCHEMA,
             "text_sha256": self.text_sha256,
         }
+        if self.decision_class is not None:
+            payload["decision_class"] = self.decision_class
+        if self.licence_ids:
+            payload["licence_ids"] = list(self.licence_ids)
+        return payload
 
     @property
     def digest(self) -> str:
@@ -207,7 +224,11 @@ class LicenseRecord:
 
     @property
     def expected_decision(self) -> str:
-        return "accept" if self.requires_typed_agreement else "record"
+        if self.requires_typed_agreement:
+            return "accept"
+        if self.decision_class == "affirmative":
+            return "accept"
+        return "record"
 
     def agreement_binding_digests(self) -> dict[str, str]:
         return {
@@ -234,6 +255,9 @@ class LicenseRecord:
                 "binding_conditions",
                 "advisories",
                 "statements",
+                "determinations_sha256",
+                "decision_class",
+                "licence_ids",
             }
         )
         if unknown:
@@ -241,6 +265,21 @@ class LicenseRecord:
         schema = raw.get("schema")
         if schema != RECORD_SCHEMA:
             raise ValueError(f"licence record schema must be {RECORD_SCHEMA}")
+        determinations = raw.get("determinations_sha256")
+        if determinations is not None:
+            determinations = require_sha256(determinations, "determinations_sha256")
+        decision_class = raw.get("decision_class")
+        if decision_class is not None:
+            if decision_class not in _DECISION_CLASSES:
+                raise ValueError(f"invalid decision_class: {decision_class!r}")
+        licence_ids_raw = raw.get("licence_ids")
+        licence_ids: tuple[str, ...] = ()
+        if licence_ids_raw is not None:
+            if not isinstance(licence_ids_raw, list) or not all(
+                isinstance(item, str) and item for item in licence_ids_raw
+            ):
+                raise ValueError("licence_ids must be an array of non-empty strings")
+            licence_ids = tuple(licence_ids_raw)
         return cls(
             id=_require_id(raw.get("id"), "id"),
             licensor=_require_text(raw.get("licensor"), "licensor"),
@@ -251,6 +290,9 @@ class LicenseRecord:
             ),
             advisories=_tuple_of(Advisory, raw.get("advisories"), "advisories"),
             statements=_tuple_of(Statement, raw.get("statements"), "statements"),
+            determinations_sha256=determinations,
+            decision_class=decision_class,
+            licence_ids=licence_ids,
         )
 
     @classmethod

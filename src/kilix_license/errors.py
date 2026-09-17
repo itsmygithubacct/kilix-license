@@ -41,3 +41,7 @@ class CoverageRefused(LicenseError):
 
 class AtomicWriteCrashed(LicenseError):
     """A planted crash during receipt publication; no covering receipt exists."""
+
+
+class HandEditedRecord(LicenseError):
+    """A committed licence record does not match generator output."""

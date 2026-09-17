@@ -1,4 +1,4 @@
-.PHONY: sync test build check hygiene
+.PHONY: sync test build check hygiene records
 
 UV ?= uv
 PYTHON_VERSION ?= 3.12.8
@@ -55,6 +55,10 @@ build:
 	"$$venv/bin/python" -c 'import kilix_license, sys; \
 	 sys.exit(0 if kilix_license.__version__ else 1)'; \
 	printf 'installed wheel imports: 1/1\n'
+
+records:
+	$(UV) run --frozen --no-sync --python $(PYTHON_VERSION) \
+		python tools/generate_records.py --check
 
 check: sync test build
 

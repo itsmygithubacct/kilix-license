@@ -38,7 +38,7 @@ def capture_agreement(
         for condition in record.binding_conditions
         if condition.agreement_required
     )
-    if not required:
+    if record.expected_decision == "record":
         if typed_text:
             raise AgreementRequired(
                 "informational licence needs no typed agreement"

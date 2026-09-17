@@ -4,6 +4,9 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- Generated licence records from the pinned determinations R2 JSON
+  (each record cites that sha256; the generator refuses a hand-edited
+  record).
 - Established the local-only repository identity with MIT licensing
   (LIC3 re-confirms the licence file).
 - Pinned Python 3.12.8 and uv 0.12.5 for the empty runtime dependency

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from kilix_license.agreement import Agreement, capture_agreement, typed_agreement_line
+from kilix_license.catalog import load_determined_records, load_determined_texts
 from kilix_license.coverage import AssetRef, covers, require
 from kilix_license.errors import (
     AgreementRequired,
     CoverageRefused,
+    HandEditedRecord,
     LicenseError,
     LiveStoreForbidden,
     ParaphraseRefused,
@@ -27,6 +29,7 @@ __all__ = [
     "AgreementRequired",
     "AssetRef",
     "CoverageRefused",
+    "HandEditedRecord",
     "LicenseError",
     "LicenseRecord",
     "LiveStoreForbidden",
@@ -40,6 +43,8 @@ __all__ = [
     "__version__",
     "capture_agreement",
     "covers",
+    "load_determined_records",
+    "load_determined_texts",
     "live_store_root",
     "receipt_from_agreement",
     "refuse_live_store",

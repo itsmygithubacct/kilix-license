@@ -1,5 +1,7 @@
 # kilix-license
 
+Licence: MIT (OD-AV). LIC3 re-confirms the LICENSE file; remote creation is RC-13.
+
 `kilix-license` is the single licence authority for Kilix (OD-AJ). It
 owns licence records stored by text digest, the verbatim first-use
 screen, agreement capture, digest-bound receipts, and binding-scoped
@@ -11,10 +13,10 @@ form is refused. OD-AI's record digest names this licence record, not an
 asset/v3 record. Advisories, statements, and component entries without
 exception text are context (OD-AQ) and are omitted from that digest.
 
-This `0.1.0` LIC1 state is a local repository: identity, hermetic
-harness, weight-absence guard, authority schema, and coverage. Model
-records land in LIC2. The repository licence file is MIT; wave LIC3
-re-confirms it (OD-AV).
+This `0.1.0` LIC2 state generates licence records from the checked
+determinations JSON (never retyped). The repository licence file is MIT
+(OD-AV). LIC3 re-confirms that LICENSE file; the GitHub remote remains
+RC-13.
 
 ## Publication status
 
