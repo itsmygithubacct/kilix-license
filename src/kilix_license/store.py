@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 from pathlib import Path
+import time
 
 from kilix_license.errors import AtomicWriteCrashed
 from kilix_license.receipts import Receipt, parse_receipt_bytes
@@ -36,22 +38,38 @@ class ReceiptStore:
 
     def write(self, receipt: Receipt, *, crash_before_replace: bool = False) -> Path:
         dest = self.path_for(receipt.record_digest, receipt.manifest_digest)
-        tmp = self.root / f".{dest.name}.tmp"
         payload = receipt.to_bytes()
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        fd = os.open(tmp, flags, 0o600)
+        lock_fd = os.open(self.root / ".store.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            os.write(fd, payload)
-            os.fsync(fd)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            stale_prefix = f".{dest.name}"
+            for entry in self.root.iterdir():
+                name = entry.name
+                if name.startswith(stale_prefix) and name.endswith(".tmp"):
+                    try:
+                        os.unlink(entry)
+                    except FileNotFoundError:
+                        pass
+            tmp = self.root / f".{dest.name}.{os.getpid()}.{time.time_ns()}.tmp"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            fd = os.open(tmp, flags, 0o600)
+            try:
+                os.write(fd, payload)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            if crash_before_replace:
+                # Bytes exist in tmp; dest is unpublished. Retry removes stale
+                # tmp under this lock, or uses a unique name per attempt.
+                raise AtomicWriteCrashed(f"planted crash before replace {dest.name}")
+            os.replace(tmp, dest)
+            dir_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+            os.chmod(dest, 0o600)
+            return dest
         finally:
-            os.close(fd)
-        if crash_before_replace:
-            raise AtomicWriteCrashed(f"planted crash before replace {dest.name}")
-        os.replace(tmp, dest)
-        dir_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-        os.chmod(dest, 0o600)
-        return dest
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)

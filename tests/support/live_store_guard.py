@@ -1,4 +1,9 @@
-"""Refuse every open/write under the NSS-home live receipt store."""
+"""Refuse every open/write under the NSS-home live receipt store.
+
+dir_fd-relative paths are resolved via /proc/self/fd/<n> or refused.
+truncate, chmod, utime and rmdir are wrapped. subprocess is a stated
+limit (same as the PLAN-R4 lease guard): a child process is not wrapped.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +28,10 @@ _orig_os_remove = os.remove
 _orig_os_unlink = os.unlink
 _orig_os_link = os.link
 _orig_os_symlink = os.symlink
+_orig_os_truncate = os.truncate
+_orig_os_chmod = os.chmod
+_orig_os_utime = os.utime
+_orig_os_rmdir = os.rmdir
 _orig_shutil_copyfile = shutil.copyfile
 _orig_shutil_copy = shutil.copy
 _orig_shutil_copy2 = shutil.copy2
@@ -34,14 +43,34 @@ def live_root() -> Path:
     return live_store_root()
 
 
-def _check(path: object, *, dir_fd: int | None = None) -> None:
-    if path is None or isinstance(path, int):
-        return
+def _resolve(path: object, *, dir_fd: int | None = None) -> str | None:
+    if path is None:
+        return None
+    if isinstance(path, int):
+        try:
+            return os.readlink(f"/proc/self/fd/{path}")
+        except OSError:
+            return None
     text = os.fsdecode(path)
-    if dir_fd is not None and not os.path.isabs(text):
-        # Relative to a dir_fd: refuse rather than guess. Tests do not use this.
-        if text.startswith("."):
-            return
+    if not text:
+        return None
+    if os.path.isabs(text):
+        return text
+    if dir_fd is not None:
+        try:
+            base = os.readlink(f"/proc/self/fd/{dir_fd}")
+        except OSError as exc:
+            raise LiveStoreForbidden(
+                f"dir_fd path refused (unresolvable fd {dir_fd}): {text}"
+            ) from exc
+        return os.path.join(base, text)
+    return text
+
+
+def _check(path: object, *, dir_fd: int | None = None) -> None:
+    text = _resolve(path, dir_fd=dir_fd)
+    if not text:
+        return
     if is_under_live_store(text):
         raise LiveStoreForbidden(f"live store path refused: {text}")
 
@@ -117,6 +146,40 @@ def _wrap_symlink(src, dst, target_is_directory=False, *, dir_fd=None):
     return _orig_os_symlink(src, dst, target_is_directory, dir_fd=dir_fd)
 
 
+def _wrap_truncate(path, length):
+    _check(path)
+    return _orig_os_truncate(path, length)
+
+
+def _wrap_chmod(path, mode, *, dir_fd=None, follow_symlinks=True):
+    _check(path, dir_fd=dir_fd)
+    kwargs = {}
+    if dir_fd is not None:
+        kwargs["dir_fd"] = dir_fd
+    if follow_symlinks is not True:
+        kwargs["follow_symlinks"] = follow_symlinks
+    return _orig_os_chmod(path, mode, **kwargs)
+
+
+def _wrap_utime(path, times=None, *, ns=None, dir_fd=None, follow_symlinks=True):
+    _check(path, dir_fd=dir_fd)
+    kwargs = {}
+    if ns is not None:
+        kwargs["ns"] = ns
+    if dir_fd is not None:
+        kwargs["dir_fd"] = dir_fd
+    if follow_symlinks is not True:
+        kwargs["follow_symlinks"] = follow_symlinks
+    return _orig_os_utime(path, times, **kwargs)
+
+
+def _wrap_rmdir(path, *, dir_fd=None):
+    _check(path, dir_fd=dir_fd)
+    if dir_fd is None:
+        return _orig_os_rmdir(path)
+    return _orig_os_rmdir(path, dir_fd=dir_fd)
+
+
 def _wrap_copyfile(src, dst, follow_symlinks=True):
     _check(src)
     _check(dst)
@@ -168,6 +231,10 @@ def install() -> None:
     os.unlink = _wrap_unlink
     os.link = _wrap_link
     os.symlink = _wrap_symlink
+    os.truncate = _wrap_truncate
+    os.chmod = _wrap_chmod
+    os.utime = _wrap_utime
+    os.rmdir = _wrap_rmdir
     shutil.copyfile = _wrap_copyfile
     shutil.copy = _wrap_copy
     shutil.copy2 = _wrap_copy2

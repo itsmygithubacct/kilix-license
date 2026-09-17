@@ -20,6 +20,7 @@ ALWAYS_SUFFIXES = (
     ".mdl",
     ".tflite",
     ".th",
+    ".fst",
 )
 SIZE_GATED_SUFFIXES = (
     ".bin",
@@ -36,7 +37,8 @@ SIZE_GATE_BYTES = 1024 * 1024
 GGUF_MAGIC = b"GGUF"
 GGML_MAGIC = b"ggml"
 GGML_MAGIC_REV = b"lmgg"
-FST_MAGIC = b"\xd2\xfd\xd0\xfb"
+# OpenFst kFstMagicNumber 2125659606 (0x7EB2FDD6), little-endian d6 fd b2 7e.
+FST_MAGIC = b"\xd6\xfd\xb2\x7e"
 
 
 @dataclass(frozen=True)

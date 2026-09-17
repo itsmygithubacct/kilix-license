@@ -22,13 +22,22 @@ def _compare(field: str, expected: str, actual: str) -> None:
         raise CoverageRefused(field)
 
 
-def covers(record: LicenseRecord, receipt: Receipt) -> bool:
-    """True when receipt covers record binding. Context digests are ignored.
+def covers(
+    record: LicenseRecord,
+    receipt: Receipt,
+    *,
+    manifest_digest: str,
+) -> bool:
+    """True when receipt covers the OD-AI binding, including the manifest.
 
-    A one-byte change to any bound field raises CoverageRefused naming the
-    field. Catalogue-digest binding (R3 shape) raises ReceiptShapeError.
+    The expected manifest is required so consumers cannot call a form that
+    ignores it. A one-byte change to any bound field raises CoverageRefused
+    naming the field. Catalogue-digest binding (R3 shape) raises
+    ReceiptShapeError. Advisory/statement/non-exception component digests
+    are context (OD-AQ) and are not compared.
     """
     parse_receipt(receipt.to_jsonable())
+    _compare("manifest_digest", manifest_digest, receipt.manifest_digest)
     _compare("licence_id", record.id, receipt.licence_id)
     _compare("licensor", record.licensor, receipt.licensor)
     _compare("licence_text_digest", record.text_sha256, receipt.licence_text_digest)
@@ -42,7 +51,8 @@ def covers(record: LicenseRecord, receipt: Receipt) -> bool:
         field = sorted(missing | extra)[0]
         raise CoverageRefused(f"binding_condition_text_digests:{field}")
     for key, digest in expected_binding.items():
-        if actual_binding[key] != digest:
+        actual = actual_binding.get(key)
+        if actual is None or actual != digest:
             raise CoverageRefused(f"binding_condition_text_digests:{key}")
     _compare("decision", record.expected_decision, receipt.decision)
     _compare("record_digest", record.digest, receipt.record_digest)
@@ -63,7 +73,7 @@ def require(
         if others:
             raise CoverageRefused("manifest_digest")
         raise CoverageRefused("receipt")
-    covers(record, receipt)
+    covers(record, receipt, manifest_digest=asset.manifest_digest)
     if receipt.manifest_digest != asset.manifest_digest:
         raise CoverageRefused("manifest_digest")
     if receipt.record_digest != asset.record_digest:
@@ -73,7 +83,7 @@ def require(
 
 def refuse_catalogue_binding(raw: dict[str, object]) -> None:
     """Refuse a planted R3 receipt that binds catalogue digest."""
-    if "catalogue_digest" in raw or "catalog_sha256" in raw:
-        field = "catalogue_digest" if "catalogue_digest" in raw else "catalog_sha256"
-        raise ReceiptShapeError(field)
+    for field in ("catalogue_digest", "catalog_sha256", "catalogue_sha256"):
+        if field in raw:
+            raise ReceiptShapeError(field)
     parse_receipt(raw)

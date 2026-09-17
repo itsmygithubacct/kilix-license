@@ -14,6 +14,10 @@ class Agreement:
     named_binding_ids: tuple[str, ...]
     decision: str
     typed_text: str | None
+    # Digests taken from the rendered screen at capture time (OD-AH/AP).
+    # receipt_from_agreement refuses when they differ from the record.
+    record_digest: str | None = None
+    binding_condition_text_digests: dict[str, str] | None = None
 
 
 def typed_agreement_line(record: LicenseRecord) -> str:
@@ -39,11 +43,25 @@ def capture_agreement(
             raise AgreementRequired(
                 "informational licence needs no typed agreement"
             )
-        return Agreement(record.id, (), "record", None)
+        return Agreement(
+            record.id,
+            (),
+            "record",
+            None,
+            record_digest=record.digest,
+            binding_condition_text_digests=dict(record.agreement_binding_digests()),
+        )
     expected = typed_agreement_line(record)
     if typed_text != expected:
         raise AgreementRequired(
             "typed agreement must name every binding text shown: "
             f"expected {expected!r}"
         )
-    return Agreement(record.id, required, "accept", typed_text)
+    return Agreement(
+        record.id,
+        required,
+        "accept",
+        typed_text,
+        record_digest=record.digest,
+        binding_condition_text_digests=dict(record.agreement_binding_digests()),
+    )

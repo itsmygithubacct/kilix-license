@@ -1,10 +1,16 @@
 import os
 from pathlib import Path
+import struct
 import subprocess
 import tempfile
 import unittest
 
-from weight_scan import catalog_matches_generator, scan_tree, sha256_file
+from weight_scan import (
+    SIZE_GATE_BYTES,
+    catalog_matches_generator,
+    scan_tree,
+    sha256_file,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "tests" / "data" / "catalog_digests.txt"
@@ -87,3 +93,54 @@ class WeightGuardTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertFalse(catalog_matches_generator(ROOT, planted))
+
+    def test_openfst_header_is_detected(self) -> None:
+        tree = Path(tempfile.mkdtemp(prefix="kilix-license-weight-fst-"))
+        (tree / "graph").mkdir()
+        header = struct.pack("<i", 2125659606) + b"\x06\x00\x00\x00vector" + b"\x00" * 32
+        (tree / "graph" / "Gr.fst").write_bytes(header)
+        _git_init(tree)
+        catalog = tree / "catalog_digests.txt"
+        catalog.write_text(CATALOG.read_text(encoding="utf-8"), encoding="utf-8")
+        self.assertNotEqual([], scan_tree(tree, catalog))
+
+    def test_openfst_magic_on_neutral_name_is_detected(self) -> None:
+        tree = Path(tempfile.mkdtemp(prefix="kilix-license-weight-fst-magic-"))
+        (tree / "graph").mkdir()
+        header = struct.pack("<i", 2125659606) + b"\x06\x00\x00\x00vector" + b"\x00" * 32
+        (tree / "graph" / "HCLr.renamed").write_bytes(header)
+        _git_init(tree)
+        catalog = tree / "catalog_digests.txt"
+        catalog.write_text(CATALOG.read_text(encoding="utf-8"), encoding="utf-8")
+        findings = scan_tree(tree, catalog)
+        self.assertTrue(any(item.reason == "magic:fst" for item in findings))
+
+    def test_planted_safetensors_magic_fails(self) -> None:
+        tree = Path(tempfile.mkdtemp(prefix="kilix-license-weight-st-"))
+        meta = b'{"x":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}'
+        (tree / "planted.dat").write_bytes(len(meta).to_bytes(8, "little") + meta)
+        _git_init(tree)
+        catalog = tree / "catalog_digests.txt"
+        catalog.write_text(CATALOG.read_text(encoding="utf-8"), encoding="utf-8")
+        findings = scan_tree(tree, catalog)
+        self.assertTrue(any(item.reason == "magic:safetensors" for item in findings))
+
+    def test_planted_onnx_suffix_fails(self) -> None:
+        tree = Path(tempfile.mkdtemp(prefix="kilix-license-weight-onnx-"))
+        (tree / "planted.onnx").write_bytes(b"not a real model")
+        _git_init(tree)
+        catalog = tree / "catalog_digests.txt"
+        catalog.write_text(CATALOG.read_text(encoding="utf-8"), encoding="utf-8")
+        findings = scan_tree(tree, catalog)
+        self.assertTrue(any(item.reason == "weight-suffix:.onnx" for item in findings))
+
+    def test_size_gated_suffix_at_gate_fails(self) -> None:
+        tree = Path(tempfile.mkdtemp(prefix="kilix-license-weight-size-"))
+        (tree / "planted.bin").write_bytes(b"\0" * SIZE_GATE_BYTES)
+        _git_init(tree)
+        catalog = tree / "catalog_digests.txt"
+        catalog.write_text(CATALOG.read_text(encoding="utf-8"), encoding="utf-8")
+        findings = scan_tree(tree, catalog)
+        self.assertTrue(
+            any(item.reason == "weight-suffix-size:.bin" for item in findings)
+        )

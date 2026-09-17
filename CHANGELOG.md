@@ -15,3 +15,13 @@ All notable changes to `kilix-license` are recorded here.
   and digest-bound atomic receipts.
 - Added binding-scoped covers() and require(); catalogue-digest binding
   is refused.
+- Record digest omits advisory, statement, and non-exception component
+  hashes (OD-AQ); covers() requires the expected manifest.
+- Agreements carry the record and binding digests shown; accept receipts
+  require the typed line.
+- Live-store guard resolves dir_fd via /proc/self/fd and wraps truncate,
+  chmod, utime, and rmdir.
+- OpenFst magic is d6 fd b2 7e and .fst is a weight suffix.
+- Receipt writes use a unique temp name and remove stale temps under the
+  store lock so a retry after crash succeeds.
+- LOCAL_ONLY remote checks allow a clone-created origin.

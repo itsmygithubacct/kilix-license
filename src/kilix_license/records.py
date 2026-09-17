@@ -171,9 +171,35 @@ class LicenseRecord:
             "text_sha256": self.text_sha256,
         }
 
+    def to_binding_jsonable(self) -> dict[str, Any]:
+        """Licence-record payload that forms the OD-AI record digest.
+
+        OD-AI's "record digest" names this licence record (OD-AJ), not an
+        asset/v3 record. Binding fields are: this digest (sans advisories),
+        manifest digest, licence id, licence text digest, decision, licensor,
+        and every agreement-required binding-condition text digest.
+
+        Advisories, statements, and component entries without exception text
+        are context (OD-AQ). Their text hashes are omitted here, so a changed
+        advisory keeps covers() and is recorded as receipt context the next
+        time the screen is shown.
+        """
+        return {
+            "binding_conditions": [item.to_jsonable() for item in self.binding_conditions],
+            "components": [
+                item.to_jsonable()
+                for item in self.components
+                if item.exception_text_sha256 is not None
+            ],
+            "id": self.id,
+            "licensor": self.licensor,
+            "schema": RECORD_SCHEMA,
+            "text_sha256": self.text_sha256,
+        }
+
     @property
     def digest(self) -> str:
-        return sha256_hex(canonical_json(self.to_jsonable()))
+        return sha256_hex(canonical_json(self.to_binding_jsonable()))
 
     @property
     def requires_typed_agreement(self) -> bool:

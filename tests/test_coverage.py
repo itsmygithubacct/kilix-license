@@ -44,7 +44,13 @@ class CoverageTests(unittest.TestCase):
         )
 
     def test_unchanged_binding_covers(self) -> None:
-        self.assertTrue(covers(self.fixtures.pocket, self.receipt))
+        self.assertTrue(
+            covers(
+                self.fixtures.pocket,
+                self.receipt,
+                manifest_digest=FIXTURE_MANIFEST,
+            )
+        )
         found = require(
             self.asset, records=self.fixtures.index, store=self.store
         )
@@ -80,8 +86,23 @@ class CoverageTests(unittest.TestCase):
         for field, mutated in cases:
             with self.subTest(field=field):
                 with self.assertRaises(CoverageRefused) as refused:
-                    covers(self.fixtures.pocket, mutated)
+                    covers(
+                        self.fixtures.pocket,
+                        mutated,
+                        manifest_digest=FIXTURE_MANIFEST,
+                    )
                 self.assertEqual(refused.exception.field, field)
+
+        flipped_receipt = replace(
+            self.receipt, manifest_digest=_flip(self.receipt.manifest_digest)
+        )
+        with self.assertRaises(CoverageRefused) as refused:
+            covers(
+                self.fixtures.pocket,
+                flipped_receipt,
+                manifest_digest=FIXTURE_MANIFEST,
+            )
+        self.assertEqual(refused.exception.field, "manifest_digest")
 
         flipped_manifest = replace(
             self.asset, manifest_digest=_flip(self.asset.manifest_digest)
@@ -98,9 +119,36 @@ class CoverageTests(unittest.TestCase):
         catalogue = replace(
             self.receipt, catalogue_digest=_flip(self.receipt.catalogue_digest)
         )
-        self.assertTrue(covers(self.fixtures.pocket, advisory))
-        self.assertTrue(covers(self.fixtures.pocket, release))
-        self.assertTrue(covers(self.fixtures.pocket, catalogue))
+        self.assertTrue(
+            covers(self.fixtures.pocket, advisory, manifest_digest=FIXTURE_MANIFEST)
+        )
+        self.assertTrue(
+            covers(self.fixtures.pocket, release, manifest_digest=FIXTURE_MANIFEST)
+        )
+        self.assertTrue(
+            covers(self.fixtures.pocket, catalogue, manifest_digest=FIXTURE_MANIFEST)
+        )
+
+    def test_covers_refuses_binding_key_set_mismatch(self) -> None:
+        extra = replace(
+            self.receipt,
+            binding_condition_text_digests={
+                **self.receipt.binding_condition_text_digests,
+                "extra-condition": "ab" * 32,
+            },
+        )
+        with self.assertRaises(CoverageRefused) as refused:
+            covers(self.fixtures.pocket, extra, manifest_digest=FIXTURE_MANIFEST)
+        self.assertEqual(
+            refused.exception.field, "binding_condition_text_digests:extra-condition"
+        )
+        missing = replace(self.receipt, binding_condition_text_digests={})
+        with self.assertRaises(CoverageRefused) as refused:
+            covers(self.fixtures.pocket, missing, manifest_digest=FIXTURE_MANIFEST)
+        self.assertEqual(
+            refused.exception.field,
+            "binding_condition_text_digests:pocket-prohibited-use",
+        )
 
     def test_planted_r3_catalogue_digest_binding_is_refused(self) -> None:
         raw = self.receipt.to_jsonable()
@@ -114,3 +162,9 @@ class CoverageTests(unittest.TestCase):
         with self.assertRaises(ReceiptShapeError) as refused:
             parse_receipt(r3)
         self.assertEqual(refused.exception.field, "catalog_sha256")
+        planted_sha = dict(raw)
+        planted_sha["catalogue_sha256"] = raw["context"]["catalogue_digest"]
+        with self.assertRaises(ReceiptShapeError) as refused:
+            parse_receipt(planted_sha)
+        self.assertEqual(refused.exception.field, "catalogue_sha256")
+        self.assertIn("R3 shape", str(refused.exception))

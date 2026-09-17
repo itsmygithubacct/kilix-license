@@ -81,11 +81,13 @@ class RepositoryIdentityTests(unittest.TestCase):
         if remotes is None:
             self.skipTest("repository state unobservable; consistency not checked")
         if disposition == "LOCAL_ONLY":
+            extra = [name for name in remotes if name != "origin"]
             self.assertEqual(
                 [],
-                remotes,
+                extra,
                 "PUBLICATION.md declares LOCAL_ONLY but the repository has "
-                f"remotes {remotes}; the document contradicts reality",
+                f"non-origin remotes {extra}; git clone always creates origin "
+                "and that is not a publication remote",
             )
         else:
             self.assertNotEqual(
@@ -119,10 +121,19 @@ class RepositoryIdentityTests(unittest.TestCase):
         self.assertRegex(section, r"(?m)^- ")
 
     def test_no_git_remote(self) -> None:
+        # Follow PUBLICATION.md. LOCAL_ONLY ⇒ empty remotes on the
+        # publication subject. `git clone` always creates origin; that is
+        # not a failure of an unmodified clone (R4-035). Extra remotes
+        # still fail. PUBLISHED requires a remote.
         remotes = configured_remotes()
         if remotes is None:
             self.skipTest("repository state unobservable")
-        self.assertEqual([], remotes)
+        disposition_text = (ROOT / "PUBLICATION.md").read_text(encoding="utf-8")
+        if re.search(r"\*\*Disposition:\*\*\s*`PUBLISHED`", disposition_text):
+            self.assertNotEqual([], remotes)
+            return
+        extra = [name for name in remotes if name != "origin"]
+        self.assertEqual([], extra)
 
     def test_author_and_committer_identity(self) -> None:
         result = subprocess.run(

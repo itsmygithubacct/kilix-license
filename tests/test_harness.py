@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -41,3 +42,41 @@ class HarnessTests(unittest.TestCase):
     def test_guard_root_is_nss_home_not_redirected_home(self) -> None:
         self.assertEqual(live_root(), live_store_root())
         self.assertEqual(live_root().parts[-2:], (".local", "gpu_terminal"))
+
+    def test_planted_dir_fd_relative_create_is_refused(self) -> None:
+        live = live_root()
+        planted = live / "lacc-f4-dirfd.json"
+        fd = os.open(str(live.parent), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with self.assertRaises(LiveStoreForbidden):
+                os.open(
+                    "gpu_terminal/lacc-f4-dirfd.json",
+                    os.O_CREAT | os.O_WRONLY,
+                    0o600,
+                    dir_fd=fd,
+                )
+        finally:
+            os.close(fd)
+        self.assertFalse(planted.exists())
+
+    def test_planted_truncate_is_refused(self) -> None:
+        target = live_root() / "sentinel.txt"
+        with self.assertRaises(LiveStoreForbidden):
+            os.truncate(str(target), 0)
+
+    def test_planted_chmod_is_refused(self) -> None:
+        with self.assertRaises(LiveStoreForbidden):
+            os.chmod(str(live_root() / "sentinel.txt"), 0o666)
+
+    def test_planted_utime_is_refused(self) -> None:
+        with self.assertRaises(LiveStoreForbidden):
+            os.utime(str(live_root() / "sentinel.txt"), None)
+
+    def test_utime_none_outside_live_store_still_works(self) -> None:
+        path = self._scratch / "touch-me"
+        path.write_text("x", encoding="utf-8")
+        os.utime(path, None)
+
+    def test_planted_rmdir_is_refused(self) -> None:
+        with self.assertRaises(LiveStoreForbidden):
+            os.rmdir(str(live_root() / "emptydir"))

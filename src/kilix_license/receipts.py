@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from kilix_license.agreement import Agreement
+from kilix_license.agreement import Agreement, typed_agreement_line
 from kilix_license.digest import (
     canonical_json,
     load_json_object,
@@ -166,6 +166,20 @@ def receipt_from_agreement(
     expected = record.agreement_binding_digests()
     if tuple(sorted(agreement.named_binding_ids)) != tuple(sorted(expected)):
         raise AgreementRequired("agreement did not name every binding condition")
+    if agreement.decision == "accept" and agreement.typed_text != typed_agreement_line(
+        record
+    ):
+        raise AgreementRequired("accept receipt requires the typed agreement line")
+    if agreement.record_digest is None and agreement.binding_condition_text_digests is None:
+        raise AgreementRequired("agreement is not bound to the bytes shown")
+    if agreement.record_digest is not None and agreement.record_digest != record.digest:
+        raise AgreementRequired("agreement record digest does not match the record")
+    if agreement.binding_condition_text_digests is not None:
+        shown = dict(agreement.binding_condition_text_digests)
+        if shown != expected:
+            raise AgreementRequired(
+                "agreement binding digests do not match the record"
+            )
     return Receipt(
         record_digest=record.digest,
         manifest_digest=require_sha256(manifest_digest, "manifest_digest"),
