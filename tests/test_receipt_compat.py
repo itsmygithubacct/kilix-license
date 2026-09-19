@@ -35,6 +35,7 @@ from fixtures import FIXTURE_CATALOGUE, FIXTURE_MANIFEST, FIXTURE_RELEASE
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY = ROOT / "tests" / "data" / "receipts-fbdfb546"
+LIC4 = ROOT / "tests" / "data" / "receipts-967a2455"
 
 
 def _lic4_receipt(record):
@@ -110,6 +111,7 @@ class Lic4ReceiptContextTests(unittest.TestCase):
                     context["component_exception_digests"], record.component_exception_digests()
                 )
                 self.assertEqual(context["binding_text_ids"], record.binding_text_ids())
+                self.assertEqual(context["licence_text_id"], record.licence_text_id)
                 self.assertEqual(parse_receipt_bytes(receipt.to_bytes()), receipt)
                 self.assertTrue(covers(record, receipt, manifest_digest=FIXTURE_MANIFEST))
         ternary = _lic4_receipt(self.index.by_id("bonsai-image-4b:ternary-gemlite"))
@@ -136,6 +138,7 @@ class Lic4ReceiptContextTests(unittest.TestCase):
             ("binding_text_ids", {"bfl-usage-policy": "example.org/other"}),
             ("statement_digests", {"planted": "cd" * 32}),
             ("component_exception_digests", {"planted": "ef" * 32}),
+            ("licence_text_id", "example.org/other-licence"),
         ):
             with self.subTest(field=field):
                 self.assertTrue(
@@ -160,6 +163,56 @@ class Lic4ReceiptContextTests(unittest.TestCase):
         with self.assertRaises(ReceiptShapeError) as refused:
             parse_receipt(with_context(shown_at="2026-09-19"))
         self.assertEqual(refused.exception.field, "shown_at")
+        for bad in ("has space", "", 7, {"x": "y"}):
+            with self.subTest(licence_text_id=bad):
+                with self.assertRaises(ValueError):
+                    parse_receipt(with_context(licence_text_id=bad))
+
+
+class Lic4ReceiptTests(unittest.TestCase):
+    """tests/data/receipts-967a2455/ holds five receipts written by the LIC4 code
+    (a git archive of 967a2455): LIC4 context keys, no licence_text_id. Manifest
+    sha256("lic4fix-compat-manifest:<record id>"), release
+    sha256("lic4fix-compat-release"), catalogue sha256("lic4fix-compat-catalogue")."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = load_determined_records()
+        cls.files = sorted(LIC4.glob("*.json"))
+
+    def test_fixture_set_is_the_five_written_receipts(self) -> None:
+        ids = sorted(parse_receipt_bytes(p.read_bytes()).licence_id for p in self.files)
+        self.assertEqual(
+            ids,
+            [
+                "bitnet-b1.58-2b4t",
+                "bonsai-image-4b:ternary-gemlite",
+                "encodec-24khz-stateful",
+                "piper-en-us-kristin-medium",
+                "small-en-us",
+            ],
+        )
+
+    def test_lic4_receipts_read_round_trip_and_cover(self) -> None:
+        store = FakeStore(Path(tempfile.mkdtemp(prefix="kilix-license-compat-lic4-")) / "receipts")
+        for path in self.files:
+            shutil.copy2(path, store.root / path.name)
+        for path in self.files:
+            with self.subTest(receipt=path.name):
+                data = path.read_bytes()
+                receipt = parse_receipt_bytes(data)
+                self.assertEqual(receipt.to_bytes(), data)
+                self.assertIsNone(receipt.licence_text_id)
+                self.assertIsNotNone(receipt.binding_text_ids)
+                self.assertIsNotNone(receipt.statement_digests)
+                record = self.index.by_digest(receipt.record_digest)
+                self.assertTrue(covers(record, receipt, manifest_digest=receipt.manifest_digest))
+                found = require(
+                    AssetRef(receipt.licence_id, receipt.record_digest, receipt.manifest_digest),
+                    records=self.index,
+                    store=store,
+                )
+                self.assertEqual(found, receipt)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,11 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- Licence texts carry a generated document identity, `licence_text_id`,
+  outside the record digest (every record digest is unchanged), so a
+  licence text revised through a sibling record is marked changed. Receipts
+  record it as context; receipts written before it resolve it through the
+  record index.
 - The receipt scan and `require` share one hardened reader: stat before
   open, `O_NONBLOCK | O_NOCTTY`, a regular-file `fstat` before any read, and
   a read budget of 1 MiB + 1 byte. A FIFO or device named like a receipt no

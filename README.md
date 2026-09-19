@@ -21,11 +21,15 @@ whose text identity an earlier accept receipt accepted with other bytes.
 screen without the marker; the two-argument form is refused. The same
 detection is `changed_texts(record, receipts, *, records=None)`, and
 `scan_receipts(store)` lists the receipt files it used and skipped. A
-binding condition's identity is its generated `text_id`, keyed by the text
-and not by record or binding id, so it holds across sibling records and a
-renamed binding. The marker never grants coverage: `covers` and `require`
-do not read it. A receipt file that cannot be parsed, or has an unknown
-schema, is skipped for the marker, never fatal.
+binding condition's identity is its generated `text_id`, and a licence
+text's identity is its record's generated `licence_text_id`. Both are keyed
+by the document, not by record or binding id, so they hold across sibling
+records (both Bonsai Image variants, both EnCodec checkpoints) and a
+renamed binding or entry. The generator refuses an identity table that
+gives two texts one identity or one text two identities. The marker never
+grants coverage: `covers` and `require` do not read it. A receipt file that
+cannot be parsed, or has an unknown schema, is skipped for the marker,
+never fatal.
 
 The scan and `require` read receipt files the same way. Each entry is
 stat'ed before it is opened, so a FIFO, device or directory is never
@@ -37,8 +41,10 @@ receipt that fails this is not a receipt: `require` refuses with
 
 Receipts written from LIC4 on also record, as context that is not bound
 (OD-AQ), the statement and component-exception digests shown on the screen
-and each binding's text identity. Receipts without those keys, as written
-before LIC4, are still read and still cover.
+and each binding's text identity; from LIC4-FIX on they also record the
+licence text identity. Receipts without those keys, as written before LIC4
+or LIC4-FIX, are still read and still cover; their identities are resolved
+through the record their licence id names (pass `records=`).
 
 This `0.1.0` LIC2 state generates licence records from the checked
 determinations JSON (never retyped). The repository licence file is MIT

@@ -102,6 +102,62 @@ BINDING_TEXT_IDS = {
     # OD-AR. The owner's non-commercial binding sentence, shown for both checkpoints.
     "encodec-noncommercial-binding": "kilix/owner-decisions/OD-AR#non-commercial-binding",
 }
+# SR-4 (LIC4-VERIFY LIC4-3): the identity of each record's licence text,
+# chosen the way BINDING_TEXT_IDS is: keyed by the determinations entry_id, the
+# value names the document the licence text is (without a revision). It is an
+# identifier, not a fetch URL. Records that show one licence text share it, so
+# a licence text revised through a sibling is marked changed. Every record must
+# be listed; the generator refuses one that is not, so a renamed entry cannot
+# silently mint a new identity. check_licence_text_ids() refuses a table that
+# gives two licence texts one identity, or one licence text two identities.
+# Each comment cites the determinations licence_texts label (or quote) the
+# value is taken from. Not bound (OD-AI): records carry it outside the digest.
+LICENCE_TEXT_IDS = {
+    # "Apache-2.0 text (Debian common-licenses copy, cfc7749b)": the Vosk models,
+    # and the card-only Apache-2.0 grants (builder reading R3 item 1).
+    "small-en-us": "debian/common-licenses/Apache-2.0",
+    "lgraph-en-us": "debian/common-licenses/Apache-2.0",
+    "granite-docling-258m": "debian/common-licenses/Apache-2.0",
+    "granite-vision-4.1-4b": "debian/common-licenses/Apache-2.0",
+    # Licence label quoted from OWNER-DETERMINATION-piper-kristin.md line 6.
+    "piper-en-us-kristin-medium": "kilix/owner-determinations/piper-kristin#licence",
+    # "MIT LICENSE of microsoft/VibeVoice".
+    "vibevoice-asr-bitnet": "github.com/microsoft/VibeVoice/LICENSE",
+    # "YOLOX LICENSE at tag 0.1.1rc0" (Megvii-BaseDetection/YOLOX).
+    "yolox_s": "github.com/Megvii-BaseDetection/YOLOX/LICENSE",
+    "yolox_tiny": "github.com/Megvii-BaseDetection/YOLOX/LICENSE",
+    "yolox_nano": "github.com/Megvii-BaseDetection/YOLOX/LICENSE",
+    # "Apache-2.0 LICENSE of tensorflow/models".
+    "yamnet": "github.com/tensorflow/models/LICENSE",
+    # "Prism ML Apache-2.0 LICENSE": one file, byte-identical in all four
+    # prism-ml repositories, so the identity names the publisher's licence.
+    "bonsai-8b": "huggingface.co/prism-ml#LICENSE",
+    "bonsai-27b": "huggingface.co/prism-ml#LICENSE",
+    "bonsai-image-4b:ternary-gemlite": "huggingface.co/prism-ml#LICENSE",
+    "bonsai-image-4b:binary-gemlite": "huggingface.co/prism-ml#LICENSE",
+    # "Ollama registry licence layer" of each library model.
+    "granite4.1:3b": "registry.ollama.ai/library/granite4.1:3b#license",
+    "granite3.2-vision:2b": "registry.ollama.ai/library/granite3.2-vision:2b#license",
+    "nomic-embed-text:v1.5": "registry.ollama.ai/library/nomic-embed-text:v1.5#license",
+    "qwen3.5:4b": "registry.ollama.ai/library/qwen3.5:4b#license",
+    # "BitNet MIT LICENSE at microsoft/bitnet-b1.58-2B-4T".
+    "bitnet-b1.58-2b4t": "huggingface.co/microsoft/bitnet-b1.58-2B-4T/LICENSE",
+    # "CC BY 4.0 legal code".
+    "pocket-tts-english-q8_0": "creativecommons.org/licenses/by/4.0/legalcode",
+    # "kilix config/model_notices a44a6081 (Apache-2.0 with Alibaba Cloud copyright)".
+    "qwen3-tts-0.6b-base": "kilix/config/model_notices#qwen3-tts",
+    "qwen3-tts-0.6b-customvoice": "kilix/config/model_notices#qwen3-tts",
+    "qwen3-tts-1.7b-voicedesign": "kilix/config/model_notices#qwen3-tts",
+    # "kilix config/model_notices b5d65a59 (OpenAI Whisper MIT LICENSE)".
+    "whisper-tiny-ggml": "kilix/config/model_notices#whisper",
+    # "CC BY-NC 4.0 legal code (creativecommons.org)", both checkpoints (OD-AR).
+    "encodec-24khz-stateful": "creativecommons.org/licenses/by-nc/4.0/legalcode",
+    "encodec-48khz-frame": "creativecommons.org/licenses/by-nc/4.0/legalcode",
+    # "MIT License canonical text, SPDX license-list-data ... text/MIT.txt".
+    "documentfigureclassifier-v2.5": "github.com/spdx/license-list-data/text/MIT.txt",
+    # "facebookresearch/encodec MIT LICENSE" (OD-AS code relicensing notice).
+    CONVERTER_ID: "github.com/facebookresearch/encodec/LICENSE",
+}
 _NON_ID = re.compile(r"[^a-z0-9._:-]+")
 _QUOTE_KEYS = (
     "binding_conditions",
@@ -339,6 +395,17 @@ def components_of(entry: Mapping[str, Any], texts_dir: Path) -> tuple[Component,
     return tuple(items)
 
 
+def licence_text_id_for(record_id: str) -> str:
+    """The declared licence text identity of record_id; a missing one is refused."""
+    text_id = LICENCE_TEXT_IDS.get(record_id)
+    if text_id is None:
+        raise ValueError(
+            f"record {record_id!r} has no licence text identity in LICENCE_TEXT_IDS "
+            "(SR-4); a renamed entry maps to its old identity"
+        )
+    return require_text_id(text_id, f"LICENCE_TEXT_IDS[{record_id!r}]")
+
+
 def record_from_entry(
     entry: Mapping[str, Any],
     *,
@@ -377,6 +444,7 @@ def record_from_entry(
         determinations_sha256=pin,
         decision_class=generated,
         licence_ids=licence_ids_of(entry),
+        licence_text_id=licence_text_id_for(entry_id),
     )
 
 
@@ -426,6 +494,7 @@ def converter_record(
         determinations_sha256=pin,
         decision_class="informational",
         licence_ids=("MIT",),
+        licence_text_id=licence_text_id_for(CONVERTER_ID),
     )
 
 
@@ -466,6 +535,43 @@ def check_binding_text_ids(
         raise ValueError(f"one quoted source span carries several text identities: {split}")
 
 
+def check_licence_text_ids(
+    payload: Mapping[str, Any],
+    table: Mapping[str, str] | None = None,
+) -> None:
+    """Refuse a licence text identity table that disagrees with the determinations.
+
+    Two different licence texts must not share one identity (that would mark
+    one "changed" against the other with nothing revised), and one licence
+    text must not carry two identities (a sibling left without its alias, the
+    LIC4-3 defect). A licence text identity must not also name a binding text.
+    Missing entries are refused where records are built.
+    """
+    if table is None:
+        table = LICENCE_TEXT_IDS
+    shown: list[tuple[str, str]] = []
+    for entry in payload.get("entries") or []:
+        shown.append((str(entry.get("entry_id")), licence_text_digest(entry)))
+    shown.append((CONVERTER_ID, _converter_mit_digest(payload)))
+    digests: dict[str, set[str]] = {}
+    identities: dict[str, set[str]] = {}
+    for record_id, digest in shown:
+        text_id = table.get(record_id)
+        if text_id is None:
+            continue
+        digests.setdefault(text_id, set()).add(digest)
+        identities.setdefault(digest, set()).add(text_id)
+    merged = sorted(text_id for text_id, found in digests.items() if len(found) > 1)
+    if merged:
+        raise ValueError(f"licence text identities cover more than one licence text: {merged}")
+    split = sorted(sorted(found) for found in identities.values() if len(found) > 1)
+    if split:
+        raise ValueError(f"one licence text carries several text identities: {split}")
+    shared = sorted(set(digests) & set(BINDING_TEXT_IDS.values()))
+    if shared:
+        raise ValueError(f"licence text identities also name binding texts: {shared}")
+
+
 def generate_records(
     payload: Mapping[str, Any],
     *,
@@ -473,6 +579,7 @@ def generate_records(
     texts_dir: Path,
 ) -> list[LicenseRecord]:
     check_binding_text_ids(payload)
+    check_licence_text_ids(payload)
     records: list[LicenseRecord] = []
     seen: set[str] = set()
     for entry in payload.get("entries") or []:

@@ -36,10 +36,12 @@ CONTEXT_FIELDS = (
 )
 # LIC4, additive: recorded, never bound, absent from older receipts. They
 # record what was on the screen (OD-AQ, C2E-VERIFY F6) and the identity of
-# each bound text (SR-4). covers() never reads them.
+# each bound text (SR-4). covers() never reads them. licence_text_id is
+# LIC4-FIX (LIC4-VERIFY LIC4-3): absent from receipts LIC4 wrote.
 OPTIONAL_CONTEXT_FIELDS = (
     "binding_text_ids",
     "component_exception_digests",
+    "licence_text_id",
     "statement_digests",
 )
 _TOP_LEVEL = frozenset(("schema", *BOUND_FIELDS, "context"))
@@ -73,6 +75,8 @@ class Receipt:
     binding_text_ids: dict[str, str] | None = None
     component_exception_digests: dict[str, str] | None = None
     statement_digests: dict[str, str] | None = None
+    # LIC4-FIX context. None: the receipt names no licence text identity.
+    licence_text_id: str | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
         context: dict[str, Any] = {
@@ -82,8 +86,9 @@ class Receipt:
         }
         for field in OPTIONAL_CONTEXT_FIELDS:
             value = getattr(self, field)
-            if value is not None:
-                context[field] = dict(sorted(value.items()))
+            if value is None:
+                continue
+            context[field] = value if isinstance(value, str) else dict(sorted(value.items()))
         return {
             "binding_condition_text_digests": dict(
                 sorted(self.binding_condition_text_digests.items())
@@ -188,6 +193,10 @@ def parse_receipt(raw: Mapping[str, Any]) -> Receipt:
     for field in ("component_exception_digests", "statement_digests"):
         if field in context:
             extra[field] = _digest_map(context.get(field), field)
+    if "licence_text_id" in context:
+        extra["licence_text_id"] = require_text_id(
+            context.get("licence_text_id"), "licence_text_id"
+        )
     return replace(receipt, **extra) if extra else receipt
 
 
@@ -240,4 +249,5 @@ def receipt_from_agreement(
         binding_text_ids=record.binding_text_ids(),
         component_exception_digests=record.component_exception_digests(),
         statement_digests=record.statement_digests(),
+        licence_text_id=record.licence_text_id,
     )

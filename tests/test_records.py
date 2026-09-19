@@ -20,10 +20,12 @@ from kilix_license.errors import AgreementRequired, HandEditedRecord, Paraphrase
 from kilix_license.generate import (
     BINDING_TEXT_IDS,
     CONVERTER_ID,
+    LICENCE_TEXT_IDS,
     FORBIDDEN_PREFIXES,
     PDF_ENGINE_RECORD_IDS,
     REQUIRED_RECORD_IDS,
     check_binding_text_ids,
+    check_licence_text_ids,
     check_records,
     data_dir,
     decision_class_for_entry,
@@ -533,10 +535,12 @@ class BindingTextIdentityTests(unittest.TestCase):
                 binding_conditions=tuple(
                     replace(item, text_id=None) for item in record.binding_conditions
                 ),
+                licence_text_id=None,
             )
             self.assertEqual(stripped.digest, record.digest)
         committed = (DATA / "records" / record_filename("bonsai-image-4b:binary-gemlite")).read_bytes()
         self.assertIn(b'"text_id":"bfl.ai/legal/usage-policy"', committed)
+        self.assertIn(b'"licence_text_id":"huggingface.co/prism-ml#LICENSE"', committed)
 
     def test_a_binding_quote_without_an_identity_is_refused(self) -> None:
         planted = json.loads(self.data.decode("utf-8"))
@@ -567,3 +571,91 @@ class BindingTextIdentityTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             check_binding_text_ids(self.payload, split)
         self.assertIn("several text identities", str(caught.exception))
+
+
+class LicenceTextIdentityTests(unittest.TestCase):
+    """LIC4-VERIFY LIC4-3: a record's licence text carries a document identity."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data, cls.payload, cls.pin = load_determinations(DATA)
+        cls.texts_dir = DATA / "texts"
+        cls.records = generate_records(cls.payload, pin=cls.pin, texts_dir=cls.texts_dir)
+        cls.by_id = {record.id: record for record in cls.records}
+
+    def test_every_record_has_its_declared_licence_text_identity(self) -> None:
+        self.assertEqual(set(LICENCE_TEXT_IDS), set(self.by_id))
+        for record in self.records:
+            with self.subTest(record=record.id):
+                self.assertEqual(record.licence_text_id, LICENCE_TEXT_IDS[record.id])
+        for record in load_determined_records():
+            with self.subTest(committed=record.id):
+                self.assertEqual(record.licence_text_id, LICENCE_TEXT_IDS[record.id])
+
+    def test_one_licence_text_one_identity(self) -> None:
+        # The identity and the licence text digest correspond one to one today, so
+        # no record is marked against another with nothing revised, and siblings
+        # that show one licence text share one identity.
+        by_identity: dict[str, set[str]] = {}
+        by_digest: dict[str, set[str]] = {}
+        for record in self.records:
+            by_identity.setdefault(record.licence_text_id, set()).add(record.text_sha256)
+            by_digest.setdefault(record.text_sha256, set()).add(record.licence_text_id)
+        self.assertEqual([k for k, v in by_identity.items() if len(v) != 1], [])
+        self.assertEqual([k for k, v in by_digest.items() if len(v) != 1], [])
+        self.assertEqual(len(by_identity), len(by_digest))
+        siblings = (
+            ("bonsai-image-4b:ternary-gemlite", "bonsai-image-4b:binary-gemlite", "bonsai-8b", "bonsai-27b"),
+            ("encodec-24khz-stateful", "encodec-48khz-frame"),
+            ("qwen3-tts-0.6b-base", "qwen3-tts-0.6b-customvoice", "qwen3-tts-1.7b-voicedesign"),
+            ("yolox_s", "yolox_tiny", "yolox_nano"),
+            ("small-en-us", "lgraph-en-us", "granite-docling-258m", "granite-vision-4.1-4b"),
+        )
+        for group in siblings:
+            with self.subTest(group=group):
+                self.assertEqual(len({self.by_id[r].licence_text_id for r in group}), 1)
+                self.assertEqual(len({self.by_id[r].text_sha256 for r in group}), 1)
+        self.assertEqual(
+            self.by_id["bonsai-image-4b:binary-gemlite"].licence_text_id,
+            "huggingface.co/prism-ml#LICENSE",
+        )
+
+    def test_a_record_without_a_licence_text_identity_is_refused(self) -> None:
+        planted = json.loads(self.data.decode("utf-8"))
+        entry = next(e for e in planted["entries"] if e["entry_id"] == "bonsai-image-4b:binary-gemlite")
+        entry["entry_id"] = "bonsai-image-4b:binary-gemlite-v2"
+        with self.assertRaises(ValueError) as caught:
+            generate_records(planted, pin=self.pin, texts_dir=self.texts_dir)
+        self.assertIn("bonsai-image-4b:binary-gemlite-v2", str(caught.exception))
+        self.assertIn("LICENCE_TEXT_IDS", str(caught.exception))
+
+    def test_a_renamed_record_keeps_its_licence_text_identity(self) -> None:
+        planted = json.loads(self.data.decode("utf-8"))
+        entry = next(e for e in planted["entries"] if e["entry_id"] == "encodec-48khz-frame")
+        entry["entry_id"] = "encodec-48khz-frame-v2"
+        table = dict(LICENCE_TEXT_IDS, **{"encodec-48khz-frame-v2": LICENCE_TEXT_IDS["encodec-48khz-frame"]})
+        with mock.patch.dict("kilix_license.generate.LICENCE_TEXT_IDS", table):
+            renamed = record_from_entry(entry, pin=self.pin, texts_dir=self.texts_dir)
+            check_licence_text_ids(planted)
+        self.assertEqual(renamed.id, "encodec-48khz-frame-v2")
+        self.assertEqual(renamed.licence_text_id, self.by_id["encodec-24khz-stateful"].licence_text_id)
+        self.assertEqual(renamed.digest, replace(self.by_id["encodec-48khz-frame"], id=renamed.id).digest)
+
+    def test_identity_table_cannot_merge_or_split_licence_texts(self) -> None:
+        check_licence_text_ids(self.payload)
+        merged = dict(LICENCE_TEXT_IDS, yolox_s=LICENCE_TEXT_IDS["bonsai-8b"])
+        with self.assertRaises(ValueError) as caught:
+            check_licence_text_ids(self.payload, merged)
+        self.assertIn("more than one licence text", str(caught.exception))
+        # The LIC4-3 defect: one sibling left with an identity of its own.
+        split = dict(LICENCE_TEXT_IDS, **{"bonsai-image-4b:binary-gemlite": "huggingface.co/prism-ml/bonsai-image-binary/LICENSE"})
+        with self.assertRaises(ValueError) as caught:
+            check_licence_text_ids(self.payload, split)
+        self.assertIn("several text identities", str(caught.exception))
+        shared = dict(LICENCE_TEXT_IDS, **{"bitnet-b1.58-2b4t": BINDING_TEXT_IDS["llama3-community-licence-full-text"]})
+        with self.assertRaises(ValueError) as caught:
+            check_licence_text_ids(self.payload, shared)
+        self.assertIn("also name binding texts", str(caught.exception))
+        with mock.patch.dict("kilix_license.generate.LICENCE_TEXT_IDS", split):
+            with self.assertRaises(ValueError):
+                generate_records(self.payload, pin=self.pin, texts_dir=self.texts_dir)

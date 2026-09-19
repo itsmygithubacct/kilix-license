@@ -3,13 +3,16 @@
 A bound text is a record's licence text, a component exception text, or an
 agreement-required binding-condition text. Each has a text identity:
 
-  licence:<record id>               the licence text of that record
+  text:<licence_text_id>            a licence text whose record declares one
+  licence:<record id>               a licence text whose record declares none
   component:<component id>          that component's exception text
   text:<text_id>                    a binding condition that declares text_id
   binding:<record id>/<binding id>  a binding condition that declares none
 
-text_id is keyed by the text, not by record id or binding id, so sibling
-records that show one policy share it, and a renamed binding keeps it (F2).
+text_id and licence_text_id are keyed by the text, not by record id or
+binding id, so sibling records that show one text share it (both Bonsai Image
+variants show one policy and one licence), and a renamed binding keeps it
+(F2, LIC4-VERIFY LIC4-3).
 
 A text shown now is marked changed when an earlier valid accept receipt
 accepted a text of the same identity and no accepted digest for that identity
@@ -67,9 +70,15 @@ def binding_identity(record_id: str, condition: BindingCondition) -> str:
     return f"binding:{record_id}/{condition.id}"
 
 
+def licence_identity(record: LicenseRecord) -> str:
+    if record.licence_text_id is not None:
+        return f"text:{record.licence_text_id}"
+    return f"licence:{record.id}"
+
+
 def bound_texts(record: LicenseRecord) -> dict[str, tuple[str, str]]:
     """Screen section label -> (text identity, sha256) for every bound text of record."""
-    found = {f"licence:{record.id}": (f"licence:{record.id}", record.text_sha256)}
+    found = {f"licence:{record.id}": (licence_identity(record), record.text_sha256)}
     for component in record.components:
         if component.exception_text_sha256 is not None:
             found[f"component:{component.id}"] = (
@@ -155,11 +164,19 @@ def accepted_texts(
     records: RecordIndex | None = None,
 ) -> set[tuple[str, str]]:
     """(text identity, sha256) pairs an accept receipt accepted."""
-    accepted = {(f"licence:{receipt.licence_id}", receipt.licence_text_digest)}
+    licence_record = _record_for(receipt.licence_id, presented, records)
+    if receipt.licence_text_id is not None:
+        licence = f"text:{receipt.licence_text_id}"
+    elif licence_record is not None:
+        # A receipt written before LIC4-FIX names no licence text identity:
+        # resolve it through the record that receipt's licence id names today.
+        licence = licence_identity(licence_record)
+    else:
+        licence = f"licence:{receipt.licence_id}"
+    accepted = {(licence, receipt.licence_text_digest)}
     for component_id, digest in (receipt.component_exception_digests or {}).items():
         accepted.add((f"component:{component_id}", digest))
     declared = receipt.binding_text_ids or {}
-    licence_record = _record_for(receipt.licence_id, presented, records)
     for binding_id, digest in receipt.binding_condition_text_digests.items():
         if binding_id in declared:
             identity = f"text:{declared[binding_id]}"
@@ -189,9 +206,10 @@ def changed_texts(
 ) -> dict[str, ChangedText]:
     """Section label -> ChangedText for each bound text changed since an acceptance.
 
-    records resolves the text identities of receipts written before LIC4 (they
-    name none) and recognises receipts for other records in view. Without it,
-    only the presented record is used for that.
+    records resolves the text identities of receipts written before LIC4 (no
+    binding identity) or before LIC4-FIX (no licence text identity), and
+    recognises receipts for other records in view. Without it, only the
+    presented record is used for that.
     """
     if not isinstance(receipts, ReceiptStore):
         raise TypeError("changed_texts needs the ReceiptStore that holds earlier receipts")

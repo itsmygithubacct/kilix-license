@@ -23,7 +23,7 @@ from kilix_license.changed import CHANGED_HEADER, MAX_RECEIPT_BYTES, changed_tex
 from kilix_license.coverage import AssetRef, covers, require
 from kilix_license.digest import canonical_json
 from kilix_license.errors import AgreementRequired, CoverageRefused
-from kilix_license.receipts import receipt_from_agreement
+from kilix_license.receipts import parse_receipt_bytes, receipt_from_agreement
 from kilix_license.records import (
     BindingCondition,
     Component,
@@ -38,6 +38,7 @@ from fixtures import FIXTURE_CATALOGUE, FIXTURE_MANIFEST, FIXTURE_RELEASE, build
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_RECEIPTS = ROOT / "tests" / "data" / "receipts-fbdfb546"
+LIC4_RECEIPTS = ROOT / "tests" / "data" / "receipts-967a2455"
 HEADER = (CHANGED_HEADER + "\n").encode("utf-8")
 POLICY_V1 = b"Example usage policy. Last revised 1 August.\nDo not do harmful things.\n"
 POLICY_V2 = b"Example usage policy. Last revised 2 August.\nDo not do harmful things.\n"
@@ -724,6 +725,109 @@ class RealRecordChangedTextTests(unittest.TestCase):
                 records=self.index,
                 store=self.store,
             )
+
+
+class RealRecordLicenceTextTests(unittest.TestCase):
+    """LIC4-VERIFY LIC4-3: a licence text revised through a sibling record is marked."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = load_determined_records()
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="kilix-license-licence-changed-"))
+        self.texts = load_determined_texts(self.root / "texts")
+
+    def _store(self, name: str) -> FakeStore:
+        return FakeStore(self.root / "receipts" / name.replace(":", "_"))
+
+    def _revised_licence(self, record: LicenseRecord) -> tuple[LicenseRecord, bytes]:
+        original = self.texts.get(record.text_sha256)
+        i = len(original) // 2
+        revised = original[:i] + (b"X" if original[i:i + 1] != b"X" else b"Y") + original[i + 1:]
+        digest = self.texts.put(revised, label="licence-planted-" + record.id)
+        return replace(record, text_sha256=digest), revised
+
+    def _index_with(self, record: LicenseRecord) -> RecordIndex:
+        return RecordIndex(tuple(record if r.id == record.id else r for r in self.index))
+
+    def test_a_licence_text_revised_through_a_sibling_is_marked(self) -> None:
+        for accepted_id, shown_id in (
+            ("bonsai-image-4b:ternary-gemlite", "bonsai-image-4b:binary-gemlite"),
+            ("encodec-24khz-stateful", "encodec-48khz-frame"),
+        ):
+            with self.subTest(accepted=accepted_id, shown=shown_id):
+                accepted = self.index.by_id(accepted_id)
+                shown = self.index.by_id(shown_id)
+                self.assertEqual(accepted.text_sha256, shown.text_sha256)
+                self.assertEqual(accepted.licence_text_id, shown.licence_text_id)
+                store = self._store(shown_id)
+                _accept(accepted, store)
+                revised, revised_bytes = self._revised_licence(shown)
+                index = self._index_with(revised)
+                section = f"licence:{shown_id}"
+                # The receipt records the identity, so the index is not needed for it.
+                for records in (index, None):
+                    changed = changed_texts(revised, store, records=records)
+                    self.assertEqual(list(changed), [section])
+                    self.assertEqual(changed[section].identity, "text:" + shown.licence_text_id)
+                    self.assertEqual(changed[section].accepted_sha256, (accepted.text_sha256,))
+                    self.assertEqual(changed[section].accepted_under, (accepted_id,))
+                    self.assertEqual(changed[section].shown_sha256, revised.text_sha256)
+                screen = render_screen(revised, self.texts, receipts=store, records=index)
+                head = f"=== {section} ===\n".encode("utf-8")
+                start = screen.find(head)
+                self.assertGreaterEqual(start, 0)
+                self.assertEqual(screen[start + len(head): start + len(head) + len(revised_bytes)], revised_bytes)
+                block = screen[screen.rfind(HEADER, 0, start): start].decode("utf-8")
+                self.assertIn(f"changed: {section}\n", block)
+                self.assertIn(f"text identity: text:{shown.licence_text_id}\n", block)
+                self.assertIn(f"accepted sha256: {accepted.text_sha256}\n", block)
+                self.assertIn(f"accepted under: {accepted_id}\n", block)
+                self.assertEqual(screen.count(HEADER), 1)
+                # Presentation only: the sibling's acceptance covers neither record.
+                for record in (revised, shown):
+                    with self.assertRaises(CoverageRefused) as refused:
+                        require(
+                            AssetRef(shown_id, record.digest, FIXTURE_MANIFEST),
+                            records=self._index_with(record),
+                            store=store,
+                        )
+                    self.assertEqual(refused.exception.field, "receipt")
+                # The unrevised sibling shows no marker.
+                self.assertEqual(changed_texts(shown, store, records=self.index), {})
+
+    def test_receipts_without_a_licence_identity_resolve_it_through_the_index(self) -> None:
+        # Receipts written by fbdfb546 (no LIC4 context) and by 967a2455 (LIC4
+        # context, no licence_text_id) name the licence text by licence id only.
+        ternary = self.index.by_id("bonsai-image-4b:ternary-gemlite")
+        revised, _bytes = self._revised_licence(self.index.by_id("bonsai-image-4b:binary-gemlite"))
+        index = self._index_with(revised)
+        for fixtures in (LEGACY_RECEIPTS, LIC4_RECEIPTS):
+            with self.subTest(fixtures=fixtures.name):
+                found = [p for p in fixtures.iterdir() if p.name.startswith(ternary.digest + "-")]
+                self.assertEqual(len(found), 1)
+                self.assertIsNone(parse_receipt_bytes(found[0].read_bytes()).licence_text_id)
+                store = self._store(fixtures.name)
+                shutil.copy2(found[0], store.root / found[0].name)
+                changed = changed_texts(revised, store, records=index)
+                self.assertEqual(list(changed), ["licence:bonsai-image-4b:binary-gemlite"])
+                self.assertEqual(changed["licence:bonsai-image-4b:binary-gemlite"].accepted_under, (ternary.id,))
+                # The documented limit: without the index nothing names that
+                # receipt's licence identity. The full text and a typed acceptance
+                # are still required; only the marker is absent.
+                self.assertEqual(changed_texts(revised, store), {})
+
+    def test_no_marker_between_packaged_records_today(self) -> None:
+        # One identity per licence text: accepting any packaged record marks no
+        # other packaged record, because nothing has been revised.
+        for accepted in self.index:
+            store = self._store("all-" + accepted.id)
+            if accepted.expected_decision == "accept":  # record decisions are not acceptances
+                _accept(accepted, store)
+            for shown in self.index:
+                with self.subTest(accepted=accepted.id, shown=shown.id):
+                    self.assertEqual(changed_texts(shown, store, records=self.index), {})
 
 
 if __name__ == "__main__":

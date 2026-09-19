@@ -190,6 +190,10 @@ class LicenseRecord:
     determinations_sha256: str | None = None
     decision_class: str | None = None
     licence_ids: tuple[str, ...] = ()
+    # SR-4 (LIC4-VERIFY LIC4-3): identity of the licence text, keyed by the
+    # document, like BindingCondition.text_id. Sibling records that show one
+    # licence text share it. Not bound (OD-AI): left out of the record digest.
+    licence_text_id: str | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -208,6 +212,8 @@ class LicenseRecord:
             payload["determinations_sha256"] = self.determinations_sha256
         if self.licence_ids:
             payload["licence_ids"] = list(self.licence_ids)
+        if self.licence_text_id is not None:
+            payload["licence_text_id"] = self.licence_text_id
         return payload
 
     def to_binding_jsonable(self) -> dict[str, Any]:
@@ -221,8 +227,9 @@ class LicenseRecord:
         Advisories, statements, and component entries without exception text
         are context (OD-AQ). Their text hashes are omitted here, so a changed
         advisory keeps covers() and is recorded as receipt context the next
-        time the screen is shown. A binding condition's text_id (SR-4) is
-        omitted too: it names the text, it does not bind it.
+        time the screen is shown. A binding condition's text_id and the
+        record's licence_text_id (SR-4) are omitted too: they name the text,
+        they do not bind it.
         """
         payload: dict[str, Any] = {
             "binding_conditions": [
@@ -306,6 +313,7 @@ class LicenseRecord:
                 "determinations_sha256",
                 "decision_class",
                 "licence_ids",
+                "licence_text_id",
             }
         )
         if unknown:
@@ -328,6 +336,9 @@ class LicenseRecord:
             ):
                 raise ValueError("licence_ids must be an array of non-empty strings")
             licence_ids = tuple(licence_ids_raw)
+        licence_text_id = raw.get("licence_text_id")
+        if licence_text_id is not None:
+            licence_text_id = require_text_id(licence_text_id, "licence_text_id")
         return cls(
             id=_require_id(raw.get("id"), "id"),
             licensor=_require_text(raw.get("licensor"), "licensor"),
@@ -341,6 +352,7 @@ class LicenseRecord:
             determinations_sha256=determinations,
             decision_class=decision_class,
             licence_ids=licence_ids,
+            licence_text_id=licence_text_id,
         )
 
     @classmethod
