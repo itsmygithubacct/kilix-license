@@ -22,24 +22,24 @@ covers() and require() never read it and decide coverage exactly as before.
 Receipt files that cannot be used for the marker are skipped, never fatal
 (C2E-VERIFY F1): not a regular file, unreadable, too large, not UTF-8 JSON,
 an unknown schema, or a foreign shape. A non-regular target (a character
-device behind a symlink, a FIFO) is never opened, and an entry swapped for
-one between the check and the open cannot block the scan (C2E-FIX2-VERIFY
-T1, T2).
+device behind a symlink, a FIFO) is never opened. An entry swapped for one
+between the check and the open cannot block the scan, is never read, and
+cannot become the controlling terminal (C2E-FIX2-VERIFY T1, T2; LIC4-VERIFY
+LIC4-1, LIC4-6). No entry is read past MAX_RECEIPT_BYTES + 1 bytes, whatever
+its size claims (LIC4-2).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-import stat
 
 from kilix_license.receipts import Receipt, parse_receipt_bytes
 from kilix_license.records import BindingCondition, LicenseRecord, RecordIndex
-from kilix_license.store import ReceiptStore
+# MAX_RECEIPT_BYTES stays importable from here (LIC4); the reader lives in store.
+from kilix_license.store import MAX_RECEIPT_BYTES, ReceiptStore, read_receipt_file  # noqa: F401
 
 CHANGED_HEADER = "=== changed since your last acceptance ==="
-# A receipt is well under 4 KiB. Anything larger is not read for the marker.
-MAX_RECEIPT_BYTES = 1 << 20
 
 
 @dataclass(frozen=True)
@@ -88,37 +88,12 @@ def bound_texts(record: LicenseRecord) -> dict[str, tuple[str, str]]:
 def _read_small_regular_file(path: os.PathLike[str] | str) -> bytes | None:
     """File bytes, or None for anything the marker must not read or wait on.
 
-    T1: the target is stat'ed first (symlinks followed, as lookup() follows
-    them), so a character device, FIFO, socket or directory is never opened.
-    T2: an entry swapped between that stat and the open is still harmless:
-    the open is O_NONBLOCK, and the descriptor must fstat as a regular file
-    before one byte is read. At most MAX_RECEIPT_BYTES + 1 bytes are read, and
-    a larger entry is skipped. Every OSError means "skip".
+    store.read_receipt_file does the reading, with the same discipline
+    require() uses (T1, T2, LIC4-7): stat before the open, O_NONBLOCK |
+    O_NOCTTY, the descriptor must fstat as a regular file before one byte is
+    read, and at most MAX_RECEIPT_BYTES + 1 bytes are read. None means "skip".
     """
-    try:
-        if not stat.S_ISREG(os.stat(path).st_mode):
-            return None
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-    except OSError:
-        return None
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RECEIPT_BYTES:
-            return None
-        chunks = []
-        budget = MAX_RECEIPT_BYTES + 1
-        while budget > 0:
-            chunk = os.read(fd, min(65536, budget))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            budget -= len(chunk)
-        data = b"".join(chunks)
-        return None if len(data) > MAX_RECEIPT_BYTES else data
-    except OSError:
-        return None
-    finally:
-        os.close(fd)
+    return read_receipt_file(path)
 
 
 def scan_receipts(store: ReceiptStore) -> ReceiptScan:

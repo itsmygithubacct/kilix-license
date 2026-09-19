@@ -4,6 +4,13 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- The receipt scan and `require` share one hardened reader: stat before
+  open, `O_NONBLOCK | O_NOCTTY`, a regular-file `fstat` before any read, and
+  a read budget of 1 MiB + 1 byte. A FIFO or device named like a receipt no
+  longer hangs `require`; it is refused with `CoverageRefused`. Tests now
+  measure the bytes read from a raced device, the bounded read of an entry
+  whose size lies, and that a swapped-in terminal never becomes the
+  controlling terminal.
 - SR-4 changed-text detection in the public API: `render_screen` now
   takes the receipt store (keyword `receipts`, required) and marks each
   bound text changed since an earlier acceptance; `changed_texts` and

@@ -19,7 +19,7 @@ import unittest
 
 from kilix_license.agreement import capture_agreement, typed_agreement_line
 from kilix_license.catalog import load_determined_records, load_determined_texts
-from kilix_license.changed import CHANGED_HEADER, changed_texts, scan_receipts
+from kilix_license.changed import CHANGED_HEADER, MAX_RECEIPT_BYTES, changed_texts, scan_receipts
 from kilix_license.coverage import AssetRef, covers, require
 from kilix_license.digest import canonical_json
 from kilix_license.errors import AgreementRequired, CoverageRefused
@@ -303,32 +303,87 @@ class ChangedTextTests(unittest.TestCase):
 # The scan runs in a child: 4 GiB address space, 60 s timeout. A regression
 # that opens a device or blocks on a FIFO fails here instead of hanging the suite.
 # os.open is spied, so "never opened" does not depend on the read bound (T1).
-_SCAN_CHILD = r"""
+# os.read is spied per opened name, so "never read" is measured, not inferred
+# from the outcome (LIC4-VERIFY LIC4-1, LIC4-2). The race swaps the entry after
+# its Nth stat for a FIFO or a symlink (T2). "ctty" makes the child a session
+# leader with no controlling terminal and swaps in a pty slave (LIC4-6).
+_SPY_PRELUDE = r"""
 import json, os, resource, sys
 resource.setrlimit(resource.RLIMIT_AS, (4 << 30, 4 << 30))
-from kilix_license import changed
-from fake_store import FakeStore
-root, race = sys.argv[1], sys.argv[2]
-store = FakeStore(root)
-opened, raced = [], []
-real_open, real_stat = os.open, os.stat
-def spy_open(path, flags, *args, **kwargs):
-    opened.append(os.path.basename(os.fsdecode(path)))
-    return real_open(path, flags, *args, **kwargs)
+opened, raced, flags, nread, per_open, fds, stats = [], [], {}, {}, {}, {}, {}
+real_open, real_stat, real_read = os.open, os.stat, os.read
+RACE = {"name": "", "swap": "fifo", "after": 1}
+def spy_open(path, fl, *args, **kwargs):
+    name = os.path.basename(os.fsdecode(path))
+    opened.append(name)
+    flags.setdefault(name, []).append(fl)
+    fd = real_open(path, fl, *args, **kwargs)
+    per_open.setdefault(name, []).append(0)
+    fds[fd] = (name, len(per_open[name]) - 1)
+    return fd
+def spy_read(fd, count):
+    data = real_read(fd, count)
+    if fd in fds:
+        name, index = fds[fd]
+        nread[name] = nread.get(name, 0) + len(data)
+        per_open[name][index] += len(data)
+    return data
 def racing_stat(path, *args, **kwargs):
     result = real_stat(path, *args, **kwargs)
-    if race and os.path.basename(os.fsdecode(path)) == race and not raced:
-        raced.append(race)  # T2: regular at the check, a FIFO at the open
-        os.unlink(path)
-        os.mkfifo(path)
+    name = os.path.basename(os.fsdecode(path))
+    if RACE["name"] and name == RACE["name"] and not raced:
+        stats[name] = stats.get(name, 0) + 1
+        if stats[name] == RACE["after"]:
+            raced.append(name)  # regular at the check, something else at the open
+            os.unlink(path)
+            if RACE["swap"] == "fifo":
+                os.mkfifo(path)
+            else:
+                os.symlink(RACE["swap"], path)
     return result
-os.open, os.stat = spy_open, racing_stat
+def spies_on():
+    os.open, os.stat, os.read = spy_open, racing_stat, spy_read
+def spies_off():
+    os.open, os.stat, os.read = real_open, real_stat, real_read
+def has_ctty():
+    try:
+        fd = real_open("/dev/tty", os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    os.close(fd)
+    return True
+def spy_report(**extra):
+    extra.update({"opened": sorted(opened), "raced": raced, "read": nread,
+                  "read_per_open": per_open, "flags": {k: v for k, v in flags.items()}})
+    print(json.dumps(extra))
+"""
+_SCAN_CHILD = _SPY_PRELUDE + r"""
+from kilix_license import changed
+from fake_store import FakeStore
+root, RACE["name"] = sys.argv[1], sys.argv[2]
+RACE["swap"] = sys.argv[3] if len(sys.argv) > 3 else "fifo"
+mode = sys.argv[4] if len(sys.argv) > 4 else ""
+store = FakeStore(root)
+ctty_before = None
+if mode.startswith("ctty"):
+    os.setsid()
+    master, slave = os.openpty()
+    RACE["swap"] = os.ttyname(slave)
+    os.close(slave)
+    ctty_before = has_ctty()
+    if mode == "ctty-control":
+        # The positive control: this environment lets a tty opened without
+        # O_NOCTTY become the controlling terminal of this session leader.
+        os.close(os.open(RACE["swap"], os.O_RDONLY | os.O_NONBLOCK))
+        spy_report(ctty_before=ctty_before, ctty_after=has_ctty())
+        sys.exit(0)
+spies_on()
 try:
     scan = changed.scan_receipts(store)
 finally:
-    os.open, os.stat = real_open, real_stat
-print(json.dumps({"receipts": [r.licence_id for r in scan.receipts],
-                  "skipped": sorted(scan.skipped), "opened": sorted(opened), "raced": raced}))
+    spies_off()
+spy_report(receipts=[r.licence_id for r in scan.receipts], skipped=sorted(scan.skipped),
+           ctty_before=ctty_before, ctty_after=has_ctty() if mode else None)
 """
 
 
@@ -342,18 +397,8 @@ class ScanHazardTests(unittest.TestCase):
         self.valid = _accept(fx.pocket, self.store)
         self.valid_name = self.store.path_for(self.valid.record_digest, self.valid.manifest_digest).name
 
-    def _scan(self, race: str = "") -> dict:
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(ROOT / "tests" / "support")])
-        proc = subprocess.run(
-            [sys.executable, "-c", _SCAN_CHILD, str(self.store.root), race],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        return json.loads(proc.stdout)
+    def _scan(self, race: str = "", swap: str = "fifo", mode: str = "") -> dict:
+        return _run_child(_SCAN_CHILD, str(self.store.root), race, swap, mode)
 
     def test_character_device_symlinks_are_never_opened(self) -> None:
         links = {}
@@ -384,6 +429,70 @@ class ScanHazardTests(unittest.TestCase):
         self.assertEqual(result["raced"], ["raced.json"])
         self.assertIn("raced.json", result["opened"])  # the race was really run
         self.assertEqual(result["skipped"], ["raced.json"])
+        self.assertEqual(result["receipts"], [self.valid.licence_id])
+
+    def test_a_device_swapped_in_after_the_check_is_never_read(self) -> None:
+        # LIC4-VERIFY LIC4-1 (mutant V05): without the post-open fstat S_ISREG
+        # check the scan reads 1 MiB + 1 bytes from /dev/zero before skipping it.
+        # The outcome alone ("skipped") cannot tell; the bytes read can.
+        for swap in ("/dev/zero", "/dev/urandom", "fifo"):
+            if swap != "fifo" and not os.path.exists(swap):
+                continue
+            with self.subTest(swap=swap):
+                raced = self.store.root / "raced.json"
+                shutil.copy2(self.store.root / self.valid_name, raced)
+                try:
+                    result = self._scan(race="raced.json", swap=swap)
+                finally:
+                    raced.unlink(missing_ok=True)
+                self.assertEqual(result["raced"], ["raced.json"])
+                self.assertIn("raced.json", result["opened"])  # the race was really run
+                self.assertEqual(result["read"].get("raced.json", 0), 0)
+                self.assertEqual(result["skipped"], ["raced.json"])
+                self.assertEqual(result["receipts"], [self.valid.licence_id])
+                self.assertGreater(result["read"][self.valid_name], 0)
+
+    def test_the_scan_opens_with_o_nonblock_and_o_noctty(self) -> None:
+        # LIC4-VERIFY LIC4-6: a terminal swapped in must not become a controlling terminal.
+        result = self._scan()
+        self.assertTrue(result["flags"])
+        for name, used in result["flags"].items():
+            for flags in used:
+                with self.subTest(name=name):
+                    self.assertTrue(flags & os.O_NONBLOCK)
+                    self.assertTrue(flags & os.O_NOCTTY)
+                    self.assertEqual(flags & os.O_ACCMODE, os.O_RDONLY)
+
+    def test_a_terminal_swapped_in_never_becomes_the_controlling_terminal(self) -> None:
+        # LIC4-VERIFY LIC4-6, behaviourally: the child is a session leader with no
+        # controlling terminal, and the entry becomes a pty slave between stat and open.
+        control = self._scan(mode="ctty-control")
+        if control["ctty_before"] or not control["ctty_after"]:
+            self.skipTest("this environment does not assign a controlling terminal on open")
+        shutil.copy2(self.store.root / self.valid_name, self.store.root / "raced.json")
+        result = self._scan(race="raced.json", mode="ctty")
+        self.assertEqual(result["raced"], ["raced.json"])
+        self.assertIn("raced.json", result["opened"])
+        self.assertFalse(result["ctty_before"])
+        self.assertFalse(result["ctty_after"])
+        self.assertEqual(result["read"].get("raced.json", 0), 0)
+        self.assertEqual(result["skipped"], ["raced.json"])
+
+    def test_an_entry_whose_size_lies_is_read_boundedly_and_skipped(self) -> None:
+        # LIC4-VERIFY LIC4-2 (mutant V06b): /proc/self/pagemap is a regular file of
+        # st_size 0 with unbounded content, so only the read budget bounds it.
+        # Without the budget the child raises MemoryError under its 4 GiB limit.
+        target = "/proc/self/pagemap"
+        try:
+            os.stat(target)
+        except OSError:
+            self.skipTest(f"{target} is not available")
+        os.symlink(target, self.store.root / "pagemap.json")
+        result = self._scan()
+        self.assertIn("pagemap.json", result["opened"])  # it is regular: it is read
+        self.assertEqual(len(result["read_per_open"]["pagemap.json"]), 1)
+        self.assertLessEqual(result["read"].get("pagemap.json", 0), MAX_RECEIPT_BYTES + 1)
+        self.assertEqual(result["skipped"], ["pagemap.json"])
         self.assertEqual(result["receipts"], [self.valid.licence_id])
 
     def test_an_oversized_sparse_entry_is_skipped_unread(self) -> None:
@@ -420,6 +529,151 @@ class ScanHazardTests(unittest.TestCase):
         for name in expected:
             self.assertNotIn(name, result["opened"])
         self.assertIn(self.valid.licence_id, result["receipts"])
+
+
+def _run_child(program: str, *args: str) -> dict:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(ROOT / "tests" / "support")])
+    proc = subprocess.run(
+        [sys.executable, "-c", program, *args],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(f"child exited {proc.returncode}: {proc.stderr[-2000:]}")
+    return json.loads(proc.stdout)
+
+
+# require() reads through the same discipline as the scan (LIC4-VERIFY LIC4-7).
+_REQUIRE_CHILD = _SPY_PRELUDE + r"""
+from pathlib import Path
+from kilix_license.coverage import AssetRef, require
+from kilix_license.errors import CoverageRefused
+from fake_store import FakeStore
+from fixtures import FIXTURE_MANIFEST, build_fixtures
+root, asked, RACE["name"], RACE["swap"] = sys.argv[1:5]
+RACE["after"] = 1  # the reader's own stat is the check; the swap lands before its open
+fx = build_fixtures(Path(root) / "fx-child")
+store = FakeStore(Path(root) / "receipts")
+outcome = {}
+spies_on()
+try:
+    for label, manifest in (("asked", asked), ("own", FIXTURE_MANIFEST)):
+        try:
+            found = require(AssetRef("pocket", fx.pocket.digest, manifest), records=fx.index, store=store)
+            outcome[label] = "COVERED " + found.licence_id
+        except CoverageRefused as exc:
+            outcome[label] = "REFUSED " + exc.field
+finally:
+    spies_off()
+spy_report(outcome=outcome)
+"""
+
+
+class RequireHazardTests(unittest.TestCase):
+    """LIC4-VERIFY LIC4-7: an entry named <record digest>-*.json never hangs require().
+
+    A FIFO, a device, a directory or an entry whose size lies, at the exact
+    receipt path or under another manifest, is not a receipt: require() fails
+    closed with CoverageRefused, reads nothing from it (or at most the bound),
+    and still covers with the valid receipt beside it.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="kilix-license-require-hazard-"))
+        self.store = FakeStore(self.root / "receipts")
+        self.fx = build_fixtures(self.root / "fx")
+        self.valid = _accept(self.fx.pocket, self.store)
+        self.valid_name = self.store.path_for(self.valid.record_digest, self.valid.manifest_digest).name
+        self.asked = "a" * 64  # a manifest with no receipt
+        self.exact = self.store.path_for(self.fx.pocket.digest, self.asked)
+        self.other = self.store.path_for(self.fx.pocket.digest, "f" * 64)
+
+    def _require(self, race: str = "", swap: str = "fifo") -> dict:
+        return _run_child(_REQUIRE_CHILD, str(self.root), self.asked, race, swap)
+
+    def _assert_fail_closed(self, result: dict, name: str, *, read_at_most: int = 0) -> None:
+        self.assertEqual(result["outcome"]["asked"], "REFUSED manifest_digest")
+        self.assertEqual(result["outcome"]["own"], "COVERED " + self.fx.pocket.id)
+        # Each open of the hazard reads at most read_at_most bytes (lookup() and
+        # for_record() may each open the exact path once).
+        for count in result["read_per_open"].get(name, []):
+            self.assertLessEqual(count, read_at_most)
+
+    def test_a_non_regular_entry_is_never_opened_or_waited_on(self) -> None:
+        planted = {
+            "fifo": lambda path: os.mkfifo(path),
+            "dev-zero": lambda path: os.symlink("/dev/zero", path),
+            "dev-ptmx": lambda path: os.symlink("/dev/ptmx", path),
+            "directory": lambda path: path.mkdir(),
+        }
+        for where in ("exact", "other"):
+            for kind, plant in planted.items():
+                with self.subTest(where=where, kind=kind):
+                    path = getattr(self, where)
+                    plant(path)
+                    try:
+                        result = self._require()
+                    finally:
+                        shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
+                    self.assertNotIn(path.name, result["opened"])
+                    self._assert_fail_closed(result, path.name)
+
+    def test_without_another_receipt_the_refusal_is_receipt(self) -> None:
+        self.store.root.joinpath(self.valid_name).unlink()
+        os.mkfifo(self.other)
+        result = self._require()
+        self.assertEqual(result["outcome"]["asked"], "REFUSED receipt")
+        self.assertEqual(result["outcome"]["own"], "REFUSED receipt")
+        self.assertNotIn(self.other.name, result["opened"])
+
+    def test_an_entry_whose_size_lies_is_read_boundedly(self) -> None:
+        target = "/proc/self/pagemap"
+        try:
+            os.stat(target)
+        except OSError:
+            self.skipTest(f"{target} is not available")
+        for where in ("exact", "other"):
+            with self.subTest(where=where):
+                path = getattr(self, where)
+                os.symlink(target, path)
+                try:
+                    result = self._require()
+                finally:
+                    path.unlink()
+                self.assertIn(path.name, result["opened"])  # it is regular: it is read
+                self._assert_fail_closed(result, path.name, read_at_most=MAX_RECEIPT_BYTES + 1)
+
+    def test_an_oversized_sparse_entry_is_not_read(self) -> None:
+        sparse = self.root / "sparse.bin"
+        with open(sparse, "wb") as handle:
+            handle.truncate(8 << 30)
+        for where in ("exact", "other"):
+            with self.subTest(where=where):
+                path = getattr(self, where)
+                os.symlink(sparse, path)
+                try:
+                    result = self._require()
+                finally:
+                    path.unlink()
+                self._assert_fail_closed(result, path.name)
+
+    def test_an_exact_receipt_swapped_after_the_check_is_never_read(self) -> None:
+        # A real covering receipt for the asked manifest is regular at the check
+        # and a FIFO or device at the open: the descriptor fstat rejects it.
+        covering = _accept(self.fx.pocket, self.store, manifest=self.asked)
+        self.assertEqual(self.store.path_for(covering.record_digest, covering.manifest_digest), self.exact)
+        for swap in ("fifo", "/dev/zero"):
+            with self.subTest(swap=swap):
+                if not self.exact.exists():
+                    _accept(self.fx.pocket, self.store, manifest=self.asked)
+                result = self._require(race=self.exact.name, swap=swap)
+                self.exact.unlink()
+                self.assertEqual(result["raced"], [self.exact.name])
+                self.assertIn(self.exact.name, result["opened"])  # the race was really run
+                self._assert_fail_closed(result, self.exact.name)
 
 
 class RealRecordChangedTextTests(unittest.TestCase):
