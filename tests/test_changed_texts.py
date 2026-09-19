@@ -802,21 +802,33 @@ class RealRecordLicenceTextTests(unittest.TestCase):
         # context, no licence_text_id) name the licence text by licence id only.
         ternary = self.index.by_id("bonsai-image-4b:ternary-gemlite")
         revised, _bytes = self._revised_licence(self.index.by_id("bonsai-image-4b:binary-gemlite"))
-        index = self._index_with(revised)
+        ternary_v2 = replace(ternary, text_sha256=revised.text_sha256)
+        self.assertNotEqual(ternary_v2.digest, ternary.digest)
+        # Only the binary revised: the accepted ternary record is still in view
+        # by digest. Both revised (one determinations revision updates the
+        # publisher's licence in every repository): only the licence id names
+        # the accepted record, and it resolves to the identity.
+        indexes = {
+            "binary-revised": self._index_with(revised),
+            "both-revised": RecordIndex(
+                tuple({revised.id: revised, ternary.id: ternary_v2}.get(r.id, r) for r in self.index)
+            ),
+        }
         for fixtures in (LEGACY_RECEIPTS, LIC4_RECEIPTS):
-            with self.subTest(fixtures=fixtures.name):
-                found = [p for p in fixtures.iterdir() if p.name.startswith(ternary.digest + "-")]
-                self.assertEqual(len(found), 1)
-                self.assertIsNone(parse_receipt_bytes(found[0].read_bytes()).licence_text_id)
-                store = self._store(fixtures.name)
-                shutil.copy2(found[0], store.root / found[0].name)
-                changed = changed_texts(revised, store, records=index)
-                self.assertEqual(list(changed), ["licence:bonsai-image-4b:binary-gemlite"])
-                self.assertEqual(changed["licence:bonsai-image-4b:binary-gemlite"].accepted_under, (ternary.id,))
-                # The documented limit: without the index nothing names that
-                # receipt's licence identity. The full text and a typed acceptance
-                # are still required; only the marker is absent.
-                self.assertEqual(changed_texts(revised, store), {})
+            found = [p for p in fixtures.iterdir() if p.name.startswith(ternary.digest + "-")]
+            self.assertEqual(len(found), 1)
+            self.assertIsNone(parse_receipt_bytes(found[0].read_bytes()).licence_text_id)
+            store = self._store(fixtures.name)
+            shutil.copy2(found[0], store.root / found[0].name)
+            for label, index in indexes.items():
+                with self.subTest(fixtures=fixtures.name, index=label):
+                    changed = changed_texts(revised, store, records=index)
+                    self.assertEqual(list(changed), ["licence:bonsai-image-4b:binary-gemlite"])
+                    self.assertEqual(changed["licence:bonsai-image-4b:binary-gemlite"].accepted_under, (ternary.id,))
+            # The documented limit: without the index nothing names that
+            # receipt's licence identity. The full text and a typed acceptance
+            # are still required; only the marker is absent.
+            self.assertEqual(changed_texts(revised, store), {})
 
     def test_no_marker_between_packaged_records_today(self) -> None:
         # One identity per licence text: accepting any packaged record marks no
