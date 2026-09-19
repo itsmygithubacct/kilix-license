@@ -8,9 +8,12 @@ render_screen consumer shows it). The marker never grants coverage.
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -188,10 +191,10 @@ class ChangedTextTests(unittest.TestCase):
         for name, data in planted.items():
             (root / name).write_bytes(data)
         (root / "a-directory.json").mkdir()
-        os.mkfifo(root / "a-fifo.json")
         os.symlink(root / "missing-target", root / "dangling.json")
         (root / ".hidden.json").write_bytes(b"{not json")
-        expected = set(planted) | {"a-directory.json", "a-fifo.json", "dangling.json"}
+        # FIFOs, devices and races: ScanHazardTests, in a child with a timeout.
+        expected = set(planted) | {"a-directory.json", "dangling.json"}
         if os.geteuid() != 0:
             (root / "unreadable.json").write_bytes(valid.to_bytes())
             os.chmod(root / "unreadable.json", 0)
@@ -295,6 +298,128 @@ class ChangedTextTests(unittest.TestCase):
             render_screen(ternary, self.texts, receipts=None)
         with self.assertRaises(TypeError):
             changed_texts(ternary, self.root / "receipts")
+
+
+# The scan runs in a child: 4 GiB address space, 60 s timeout. A regression
+# that opens a device or blocks on a FIFO fails here instead of hanging the suite.
+# os.open is spied, so "never opened" does not depend on the read bound (T1).
+_SCAN_CHILD = r"""
+import json, os, resource, sys
+resource.setrlimit(resource.RLIMIT_AS, (4 << 30, 4 << 30))
+from kilix_license import changed
+from fake_store import FakeStore
+root, race = sys.argv[1], sys.argv[2]
+store = FakeStore(root)
+opened, raced = [], []
+real_open, real_stat = os.open, os.stat
+def spy_open(path, flags, *args, **kwargs):
+    opened.append(os.path.basename(os.fsdecode(path)))
+    return real_open(path, flags, *args, **kwargs)
+def racing_stat(path, *args, **kwargs):
+    result = real_stat(path, *args, **kwargs)
+    if race and os.path.basename(os.fsdecode(path)) == race and not raced:
+        raced.append(race)  # T2: regular at the check, a FIFO at the open
+        os.unlink(path)
+        os.mkfifo(path)
+    return result
+os.open, os.stat = spy_open, racing_stat
+try:
+    scan = changed.scan_receipts(store)
+finally:
+    os.open, os.stat = real_open, real_stat
+print(json.dumps({"receipts": [r.licence_id for r in scan.receipts],
+                  "skipped": sorted(scan.skipped), "opened": sorted(opened), "raced": raced}))
+"""
+
+
+class ScanHazardTests(unittest.TestCase):
+    """C2E-FIX2-VERIFY T1 and T2, and symlink targets that cannot be stat'ed."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="kilix-license-scan-hazard-"))
+        self.store = FakeStore(self.root / "receipts")
+        fx = build_fixtures(self.root / "fx")
+        self.valid = _accept(fx.pocket, self.store)
+        self.valid_name = self.store.path_for(self.valid.record_digest, self.valid.manifest_digest).name
+
+    def _scan(self, race: str = "") -> dict:
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "src"), str(ROOT / "tests" / "support")])
+        proc = subprocess.run(
+            [sys.executable, "-c", _SCAN_CHILD, str(self.store.root), race],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_character_device_symlinks_are_never_opened(self) -> None:
+        links = {}
+        for device in ("/dev/ptmx", "/dev/zero", "/dev/null", "/dev/tty", "/dev/random"):
+            if os.path.exists(device):
+                name = "device-" + os.path.basename(device) + ".json"
+                os.symlink(device, self.store.root / name)
+                links[name] = device
+        self.assertIn("device-ptmx.json", links)
+        result = self._scan()
+        self.assertEqual(result["receipts"], [self.valid.licence_id])
+        self.assertIn(self.valid_name, result["opened"])
+        for name in links:
+            with self.subTest(link=name):
+                self.assertNotIn(name, result["opened"])
+                self.assertIn(name, result["skipped"])
+
+    def test_a_fifo_is_never_opened(self) -> None:
+        os.mkfifo(self.store.root / "a-fifo.json")
+        result = self._scan()
+        self.assertNotIn("a-fifo.json", result["opened"])
+        self.assertEqual(result["skipped"], ["a-fifo.json"])
+        self.assertEqual(result["receipts"], [self.valid.licence_id])
+
+    def test_a_fifo_swapped_in_after_the_check_does_not_block(self) -> None:
+        shutil.copy2(self.store.root / self.valid_name, self.store.root / "raced.json")
+        result = self._scan(race="raced.json")
+        self.assertEqual(result["raced"], ["raced.json"])
+        self.assertIn("raced.json", result["opened"])  # the race was really run
+        self.assertEqual(result["skipped"], ["raced.json"])
+        self.assertEqual(result["receipts"], [self.valid.licence_id])
+
+    def test_an_oversized_sparse_entry_is_skipped_unread(self) -> None:
+        # 8 GiB of holes, and a link to it; the child may map at most 4 GiB.
+        sparse = self.root / "sparse.bin"
+        with open(sparse, "wb") as handle:
+            handle.truncate(8 << 30)
+        os.link(sparse, self.store.root / "sparse.json")
+        os.symlink(sparse, self.store.root / "sparse-link.json")
+        result = self._scan()
+        self.assertEqual(result["skipped"], ["sparse-link.json", "sparse.json"])
+        self.assertEqual(result["receipts"], [self.valid.licence_id])
+
+    def test_unresolvable_symlink_targets_are_skipped(self) -> None:
+        root = self.store.root
+        os.symlink(root / "loop-b.json", root / "loop-a.json")
+        os.symlink(root / "loop-a.json", root / "loop-b.json")
+        os.symlink("x" * 300 + ".json", root / "long-name.json")
+        # A component over NAME_MAX (stat: ENAMETOOLONG), and a 4004-byte target.
+        os.symlink("/".join(["y" * 199] * 20) + ".json", root / "long-path.json")
+        expected = {"loop-a.json", "loop-b.json", "long-name.json", "long-path.json"}
+        locked = self.root / "locked"
+        locked.mkdir()
+        shutil.copy2(root / self.valid_name, locked / "receipt.json")
+        os.symlink(locked / "receipt.json", root / "unsearchable.json")
+        os.chmod(locked, 0)
+        try:
+            if os.geteuid() != 0:
+                expected.add("unsearchable.json")
+            result = self._scan()
+        finally:
+            os.chmod(locked, 0o700)
+        self.assertEqual(sorted(set(result["skipped"]) & (expected | {"unsearchable.json"})), sorted(expected))
+        for name in expected:
+            self.assertNotIn(name, result["opened"])
+        self.assertIn(self.valid.licence_id, result["receipts"])
 
 
 class RealRecordChangedTextTests(unittest.TestCase):

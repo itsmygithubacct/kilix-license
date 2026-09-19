@@ -21,7 +21,10 @@ The marker is presentation only. It never grants or withdraws coverage.
 covers() and require() never read it and decide coverage exactly as before.
 Receipt files that cannot be used for the marker are skipped, never fatal
 (C2E-VERIFY F1): not a regular file, unreadable, too large, not UTF-8 JSON,
-an unknown schema, or a foreign shape.
+an unknown schema, or a foreign shape. A non-regular target (a character
+device behind a symlink, a FIFO) is never opened, and an entry swapped for
+one between the check and the open cannot block the scan (C2E-FIX2-VERIFY
+T1, T2).
 """
 
 from __future__ import annotations
@@ -83,7 +86,15 @@ def bound_texts(record: LicenseRecord) -> dict[str, tuple[str, str]]:
 
 
 def _read_small_regular_file(path: os.PathLike[str] | str) -> bytes | None:
-    """File bytes, or None for anything the marker must not read or wait on."""
+    """File bytes, or None for anything the marker must not read or wait on.
+
+    T1: the target is stat'ed first (symlinks followed, as lookup() follows
+    them), so a character device, FIFO, socket or directory is never opened.
+    T2: an entry swapped between that stat and the open is still harmless:
+    the open is O_NONBLOCK, and the descriptor must fstat as a regular file
+    before one byte is read. At most MAX_RECEIPT_BYTES + 1 bytes are read, and
+    a larger entry is skipped. Every OSError means "skip".
+    """
     try:
         if not stat.S_ISREG(os.stat(path).st_mode):
             return None
@@ -95,16 +106,15 @@ def _read_small_regular_file(path: os.PathLike[str] | str) -> bytes | None:
         if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RECEIPT_BYTES:
             return None
         chunks = []
-        total = 0
-        while True:
-            chunk = os.read(fd, 65536)
+        budget = MAX_RECEIPT_BYTES + 1
+        while budget > 0:
+            chunk = os.read(fd, min(65536, budget))
             if not chunk:
                 break
-            total += len(chunk)
-            if total > MAX_RECEIPT_BYTES:
-                return None
             chunks.append(chunk)
-        return b"".join(chunks)
+            budget -= len(chunk)
+        data = b"".join(chunks)
+        return None if len(data) > MAX_RECEIPT_BYTES else data
     except OSError:
         return None
     finally:
