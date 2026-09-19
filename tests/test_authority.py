@@ -56,7 +56,9 @@ class AuthorityTests(unittest.TestCase):
         )
 
     def test_screen_texts_are_byte_identical_to_stored_digests(self) -> None:
-        output = render_screen(self.fixtures.pocket, self.fixtures.texts)
+        output = render_screen(
+            self.fixtures.pocket, self.fixtures.texts, receipts=self.store
+        )
         self.assertIn(self.fixtures.pocket_licence, output)
         self.assertIn(self.fixtures.pocket_prohibited, output)
         self.assertIn(self.fixtures.advisory, output)
@@ -121,9 +123,17 @@ class AuthorityTests(unittest.TestCase):
                 "context",
             },
         )
+        # LIC4 adds three context keys (recorded, not bound); fbdfb546 wrote three.
         self.assertEqual(
             set(payload["context"]),
-            {"advisory_digests", "release_digest", "catalogue_digest"},
+            {
+                "advisory_digests",
+                "release_digest",
+                "catalogue_digest",
+                "binding_text_ids",
+                "component_exception_digests",
+                "statement_digests",
+            },
         )
         self.assertEqual(payload["decision"], "accept")
         self.assertEqual(payload["licensor"], "Kyutai")
@@ -174,7 +184,7 @@ class AuthorityTests(unittest.TestCase):
         self.assertEqual(next_receipt.record_digest, receipt.record_digest)
         self.assertEqual(next_receipt.advisory_digests["research-use"], digest)
         self.assertNotEqual(receipt.advisory_digests["research-use"], digest)
-        screen = render_screen(revised, self.fixtures.texts)
+        screen = render_screen(revised, self.fixtures.texts, receipts=self.store)
         self.assertIn(self.fixtures.advisory + b"Revised.\n", screen)
 
     def test_statement_change_planted_in_the_record_keeps_coverage(self) -> None:
@@ -234,8 +244,14 @@ class AuthorityTests(unittest.TestCase):
             refused.exception.field,
             "binding_condition_text_digests:pocket-prohibited-use",
         )
-        screen = render_screen(changed, self.fixtures.texts)
-        self.assertIn(b"=== binding:pocket-prohibited-use ===\n" + new_text, screen)
+        self.store.write(receipt)
+        screen = render_screen(changed, self.fixtures.texts, receipts=self.store)
+        section = b"=== binding:pocket-prohibited-use ===\n" + new_text
+        self.assertIn(section, screen)
+        # SR-4: the earlier acceptance of other bytes is marked, before the text.
+        marker = screen.find(b"=== changed since your last acceptance ===\n")
+        self.assertGreaterEqual(marker, 0)
+        self.assertLess(marker, screen.find(section))
         with self.assertRaises(AgreementRequired):
             receipt_from_agreement(
                 changed,
@@ -363,12 +379,14 @@ store.write(r)
                 ),
             ),
         )
-        output = render_screen(record, self.fixtures.texts)
+        output = render_screen(record, self.fixtures.texts, receipts=self.store)
         self.assertIn(b"=== component:pocket-tts ===\n", output)
         self.assertIn(b"Tokenizer component exception fixture.\n", output)
 
     def test_screen_includes_statement_bytes(self) -> None:
-        output = render_screen(self.fixtures.kristin, self.fixtures.texts)
+        output = render_screen(
+            self.fixtures.kristin, self.fixtures.texts, receipts=self.store
+        )
         self.assertIn(b"=== statement:trainer-statement ===\n", output)
         self.assertIn(self.fixtures.kristin_text, output)
 

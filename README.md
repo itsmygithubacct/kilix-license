@@ -13,6 +13,25 @@ form is refused. OD-AI's record digest names this licence record, not an
 asset/v3 record. Advisories, statements, and component entries without
 exception text are context (OD-AQ) and are omitted from that digest.
 
+The screen is `render_screen(record, texts, *, receipts, records=None)`.
+It marks every bound text that is "changed since your last acceptance"
+(SR-4): the licence text, a component exception, or a binding condition
+whose text identity an earlier accept receipt accepted with other bytes.
+`receipts` (the `ReceiptStore`) is required, so no consumer can render a
+screen without the marker; the two-argument form is refused. The same
+detection is `changed_texts(record, receipts, *, records=None)`, and
+`scan_receipts(store)` lists the receipt files it used and skipped. A
+binding condition's identity is its generated `text_id`, keyed by the text
+and not by record or binding id, so it holds across sibling records and a
+renamed binding. The marker never grants coverage: `covers` and `require`
+do not read it. A receipt file that cannot be parsed, or has an unknown
+schema, is skipped for the marker, never fatal.
+
+Receipts written from LIC4 on also record, as context that is not bound
+(OD-AQ), the statement and component-exception digests shown on the screen
+and each binding's text identity. Receipts without those keys, as written
+before LIC4, are still read and still cover.
+
 This `0.1.0` LIC2 state generates licence records from the checked
 determinations JSON (never retyped). The repository licence file is MIT
 (OD-AV). LIC3 re-confirms that LICENSE file; the GitHub remote remains

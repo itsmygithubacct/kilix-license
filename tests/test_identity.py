@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 import re
 import subprocess
@@ -37,7 +38,29 @@ def configured_remotes() -> list[str] | None:
     return [line for line in result.stdout.splitlines() if line]
 
 
+# OD-AV: the repository licence is MIT. LIC3-4: pinned byte for byte, and
+# checked to be the SPDX MIT text (v3.29.0, the digest-named text in
+# data/texts) apart from line wrapping and the filled-in copyright line.
+LICENSE_SHA256 = "443acd34ba896c5ee92d9ebd200436eb96f2f1aa0815e16c12c42c8f1a5fd30f"
+SPDX_MIT_TEXT = ROOT / "src" / "kilix_license" / "data" / "texts" / "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+LICENSE_COPYRIGHT = "Copyright (c) 2026 Kilix License contributors"
+SPDX_COPYRIGHT_TEMPLATE = "Copyright (c) <year> <copyright holders>"
+
+
 class RepositoryIdentityTests(unittest.TestCase):
+    def test_licence_file_is_the_mit_text(self) -> None:
+        data = (ROOT / "LICENSE").read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), LICENSE_SHA256)
+        spdx = SPDX_MIT_TEXT.read_bytes()
+        self.assertEqual(hashlib.sha256(spdx).hexdigest(), SPDX_MIT_TEXT.name)
+        text = data.decode("utf-8")
+        self.assertEqual(
+            [line for line in text.splitlines() if line.startswith("Copyright")],
+            [LICENSE_COPYRIGHT],
+        )
+        filled = text.replace(LICENSE_COPYRIGHT, SPDX_COPYRIGHT_TEMPLATE)
+        self.assertEqual(filled.split(), spdx.decode("utf-8").split())
+
     def test_version_sources_agree(self) -> None:
         self.assertEqual(
             (ROOT / "VERSION").read_text(encoding="utf-8").strip(),

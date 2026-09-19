@@ -21,6 +21,7 @@ from kilix_license.records import (
     Component,
     LicenseRecord,
     Statement,
+    require_text_id,
 )
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -77,6 +78,30 @@ REQUIRED_RECORD_IDS = (
     # OD-AY (R4-047): the kilix-pdf-conversion [granite] engine models only.
     *PDF_ENGINE_RECORD_IDS,
 )
+# SR-4 (C2E-VERIFY F2): the identity of each agreement-required binding text,
+# keyed by the determinations quote_id. The value names the document the text
+# is cut from, without a revision. It is an identifier, not a fetch URL. The
+# key is the text itself, not the record or binding id, so:
+#   - sibling records showing one text share it (both Bonsai Image variants);
+#   - a revised text keeps it while its digest changes (the changed marker);
+#   - a renamed binding keeps it: map the new quote_id to the same value.
+# Every binding quote must be listed; the generator refuses one that is not,
+# so a rename cannot silently mint a new identity. check_binding_text_ids()
+# refuses a table that merges two source documents or splits one quoted span.
+# Not bound (OD-AI): records carry it outside the record digest.
+BINDING_TEXT_IDS = {
+    # OD-AH. https://bfl.ai/legal/usage-policy (ADDENDUM-BFL-POLICY.md line 7).
+    "bfl-usage-policy": "bfl.ai/legal/usage-policy",
+    "bfl-usage-policy-binary": "bfl.ai/legal/usage-policy",
+    # OD-AG. The "## Prohibited use" section of the Pocket TTS model card README.
+    "pocket-prohibited-use": (
+        "huggingface.co/kyutai/pocket-tts-without-voice-cloning/README.md#prohibited-use"
+    ),
+    # OD-AP. The Meta Llama 3 Community License (meta-llama/llama3 LICENSE), in full.
+    "llama3-community-licence-full-text": "github.com/meta-llama/llama3/LICENSE",
+    # OD-AR. The owner's non-commercial binding sentence, shown for both checkpoints.
+    "encodec-noncommercial-binding": "kilix/owner-decisions/OD-AR#non-commercial-binding",
+}
 _NON_ID = re.compile(r"[^a-z0-9._:-]+")
 _QUOTE_KEYS = (
     "binding_conditions",
@@ -99,19 +124,20 @@ def record_filename(record_id: str) -> str:
 
 
 def load_pin(directory: Path) -> str:
+    """The one sha256 pin line. A second pin line is refused (LIC3-2): a stale
+    pin appended after the real one must not pass unnoticed."""
     pin_path = directory / PIN_NAME
     text = pin_path.read_text(encoding="utf-8")
-    digest = None
+    pins = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        parts = stripped.split()
-        if len(parts) < 1:
-            continue
-        digest = parts[0]
-        break
-    if digest is None or len(digest) != 64:
+        pins.append(stripped.split()[0])
+    if len(pins) != 1:
+        raise ValueError(f"{pin_path} must hold exactly one sha256 pin line, found {len(pins)}")
+    digest = pins[0]
+    if len(digest) != 64 or set(digest) - set("0123456789abcdef"):
         raise ValueError(f"{pin_path} does not contain a sha256 pin")
     return digest
 
@@ -262,8 +288,20 @@ def _quotes_as(
         seen.add(item_id)
         digest, _data = quote_bytes(quote, f"{label}[{index}]")
         if cls is BindingCondition:
+            text_id = BINDING_TEXT_IDS.get(quote_id)
+            if text_id is None:
+                raise ValueError(
+                    f"{label}[{index}] binding quote {quote_id!r} has no text identity "
+                    "in BINDING_TEXT_IDS (SR-4); a renamed binding maps to its old identity"
+                )
+            require_text_id(text_id, f"BINDING_TEXT_IDS[{quote_id!r}]")
             items.append(
-                BindingCondition(id=item_id, text_sha256=digest, agreement_required=True)
+                BindingCondition(
+                    id=item_id,
+                    text_sha256=digest,
+                    agreement_required=True,
+                    text_id=text_id,
+                )
             )
         elif cls is Advisory:
             items.append(Advisory(id=item_id, text_sha256=digest))
@@ -391,12 +429,50 @@ def converter_record(
     )
 
 
+def check_binding_text_ids(
+    payload: Mapping[str, Any],
+    table: Mapping[str, str] | None = None,
+) -> None:
+    """Refuse an identity table that disagrees with the determinations' sources.
+
+    One identity must not cover two source documents, and one quoted span of
+    one source document must not carry two identities (a sibling left
+    without its alias). Missing entries are refused where records are built.
+    """
+    if table is None:
+        table = BINDING_TEXT_IDS
+    sources: dict[str, set[str]] = {}
+    spans: dict[tuple[Any, ...], set[str]] = {}
+    for entry in payload.get("entries") or []:
+        for quote in entry.get("binding_conditions") or []:
+            text_id = table.get(quote.get("quote_id"))
+            if text_id is None:
+                continue
+            source = quote.get("source") or {}
+            sources.setdefault(text_id, set()).add(str(source.get("sha256")))
+            span = (
+                source.get("sha256"),
+                quote.get("line_start"),
+                quote.get("line_end"),
+                quote.get("byte_start_in_first_line"),
+                quote.get("byte_end_in_last_line"),
+            )
+            spans.setdefault(span, set()).add(text_id)
+    merged = sorted(text_id for text_id, found in sources.items() if len(found) > 1)
+    if merged:
+        raise ValueError(f"text identities cover more than one source document: {merged}")
+    split = sorted(sorted(found) for found in spans.values() if len(found) > 1)
+    if split:
+        raise ValueError(f"one quoted source span carries several text identities: {split}")
+
+
 def generate_records(
     payload: Mapping[str, Any],
     *,
     pin: str,
     texts_dir: Path,
 ) -> list[LicenseRecord]:
+    check_binding_text_ids(payload)
     records: list[LicenseRecord] = []
     seen: set[str] = set()
     for entry in payload.get("entries") or []:
@@ -444,6 +520,22 @@ def write_quote_texts(payload: Mapping[str, Any], texts_dir: Path) -> None:
                 raise TextDigestMismatch(f"text {digest} collides with different bytes")
             continue
         path.write_bytes(data)
+
+
+def check_quote_texts(payload: Mapping[str, Any], texts_dir: Path) -> None:
+    """Read-only counterpart of write_quote_texts (LIC3-3): every quote blob the
+    records need must already be committed, byte-exact. Nothing is written."""
+    problems = []
+    for digest, data in sorted(quote_blobs(payload).items()):
+        path = texts_dir / digest
+        if not path.is_file():
+            problems.append(f"missing {digest}")
+        elif path.read_bytes() != data:
+            problems.append(f"differs {digest}")
+    if problems:
+        raise HandEditedRecord(
+            "committed quote texts are missing or differ: " + ", ".join(problems)
+        )
 
 
 def render_record_bytes(record: LicenseRecord) -> bytes:

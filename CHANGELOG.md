@@ -4,6 +4,19 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- SR-4 changed-text detection in the public API: `render_screen` now
+  takes the receipt store (keyword `receipts`, required) and marks each
+  bound text changed since an earlier acceptance; `changed_texts` and
+  `scan_receipts` expose the detection. Binding conditions carry a
+  generated `text_id` (outside the record digest), so the marker holds
+  across sibling records and binding renames. Unusable receipt files are
+  skipped for the marker, never fatal; coverage is unchanged.
+- Receipts record statement and component-exception digests and binding
+  text identities as context (OD-AQ, additive); older receipts still
+  read and cover.
+- The generator's `--check` writes nothing and fails on a missing quote
+  text; the determinations pin file must hold exactly one pin; the
+  card-only licence texts and the repository LICENSE are pinned by digest.
 - Generated licence records for the three OD-AY kilix-pdf-conversion engine
   models (granite-docling-258m, documentfigureclassifier-v2.5,
   granite-vision-4.1-4b) from determinations R3; every record now cites the

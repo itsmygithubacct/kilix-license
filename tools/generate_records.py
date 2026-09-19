@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate kilix-license records from the pinned determinations JSON.
 
-Never retype licence text. --check refuses a hand-edited committed record.
+Never retype licence text. --check refuses a hand-edited committed record and
+a missing quote text, and writes nothing.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from kilix_license.errors import HandEditedRecord  # noqa: E402
 from kilix_license.generate import (  # noqa: E402
     RECORDS_DIRNAME,
     TEXTS_DIRNAME,
+    check_quote_texts,
     check_records,
     data_dir,
     generate_records,
@@ -49,12 +51,15 @@ def main(argv: list[str]) -> int:
     _data, payload, pin = load_determinations(directory)
     texts = directory / TEXTS_DIRNAME
     records_path = directory / RECORDS_DIRNAME
-    write_quote_texts(payload, texts)
-    records = generate_records(payload, pin=pin, texts_dir=texts)
     if args.check:
+        # Read-only (LIC3-3): a missing or changed quote text fails; it is never written.
+        check_quote_texts(payload, texts)
+        records = generate_records(payload, pin=pin, texts_dir=texts)
         check_records(records, records_path)
         sys.stdout.write(f"records {len(records)} match generator (pin {pin})\n")
         return 0
+    write_quote_texts(payload, texts)
+    records = generate_records(payload, pin=pin, texts_dir=texts)
     write_records(records, records_path)
     sys.stdout.write(f"wrote {len(records)} records (pin {pin})\n")
     return 0
