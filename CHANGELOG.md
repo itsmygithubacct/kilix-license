@@ -4,6 +4,11 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- Generated licence records for the three OD-AY kilix-pdf-conversion engine
+  models (granite-docling-258m, documentfigureclassifier-v2.5,
+  granite-vision-4.1-4b) from determinations R3; every record now cites the
+  R3 sha256. The Datalab/Surya models, the marker font, N3 and N4 get no
+  record.
 - Generated licence records from the pinned determinations R2 JSON
   (each record cites that sha256; the generator refuses a hand-edited
   record).

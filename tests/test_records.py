@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import shutil
@@ -16,6 +17,7 @@ from kilix_license.errors import AgreementRequired, HandEditedRecord, Paraphrase
 from kilix_license.generate import (
     CONVERTER_ID,
     FORBIDDEN_PREFIXES,
+    PDF_ENGINE_RECORD_IDS,
     REQUIRED_RECORD_IDS,
     check_records,
     data_dir,
@@ -26,6 +28,7 @@ from kilix_license.generate import (
     load_determinations,
     licensors_of,
     record_filename,
+    record_from_entry,
     render_record_bytes,
     write_quote_texts,
 )
@@ -216,3 +219,148 @@ class GeneratedRecordTests(unittest.TestCase):
     def test_write_quote_texts_is_idempotent(self) -> None:
         write_quote_texts(self.payload, self.texts_dir)
         write_quote_texts(self.payload, self.texts_dir)
+
+
+class PdfEngineRecordTests(unittest.TestCase):
+    """LIC3 (R4-047): OD-AY records for the kilix-pdf-conversion engine models."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data, cls.payload, cls.pin = load_determinations(DATA)
+        cls.texts_dir = DATA / "texts"
+        cls.records = generate_records(
+            cls.payload, pin=cls.pin, texts_dir=cls.texts_dir
+        )
+        cls.by_id = {record.id: record for record in cls.records}
+        cls.entries = {entry["entry_id"]: entry for entry in cls.payload["entries"]}
+
+    def test_od_ay_entries_are_exactly_the_pdf_records(self) -> None:
+        od_ay = sorted(
+            entry["entry_id"]
+            for entry in self.payload["entries"]
+            if (entry.get("owner_decision") or {}).get("id") == "OD-AY"
+        )
+        self.assertEqual(od_ay, sorted(PDF_ENGINE_RECORD_IDS))
+        for record_id in PDF_ENGINE_RECORD_IDS:
+            self.assertIn(record_id, self.by_id)
+            self.assertEqual(self.entries[record_id]["status"], "DETERMINED")
+
+    def test_pdf_records_equal_the_r3_determinations(self) -> None:
+        # Owner-determined values (OD-AY) as an independent check on the JSON.
+        determined = {
+            "granite-docling-258m": ("IBM", ("Apache-2.0",)),
+            "documentfigureclassifier-v2.5": ("docling-project", ("MIT",)),
+            "granite-vision-4.1-4b": ("IBM", ("Apache-2.0",)),
+        }
+        self.assertEqual(set(determined), set(PDF_ENGINE_RECORD_IDS))
+        for record_id, (licensor, licence_ids) in determined.items():
+            with self.subTest(record_id=record_id):
+                entry = self.entries[record_id]
+                record = self.by_id[record_id]
+                self.assertEqual(record.licensor, licensors_of(entry))
+                self.assertEqual(record.licensor, licensor)
+                self.assertEqual(record.licence_ids, licence_ids_of(entry))
+                self.assertEqual(record.licence_ids, licence_ids)
+                self.assertEqual(record.text_sha256, licence_text_digest(entry))
+                self.assertEqual(record.determinations_sha256, self.pin)
+                self.assertEqual(
+                    [item.id for item in record.statements],
+                    [q["quote_id"] for q in entry["statements"] + entry["attribution"]],
+                )
+                for statement, quote in zip(
+                    record.statements,
+                    entry["statements"] + entry["attribution"],
+                    strict=True,
+                ):
+                    self.assertEqual(statement.text_sha256, quote["text_sha256"])
+                    stored = (self.texts_dir / statement.text_sha256).read_bytes()
+                    self.assertEqual(stored, quote["text"].encode("utf-8"))
+                self.assertEqual(record.components, ())
+                self.assertEqual(record.advisories, ())
+
+    def test_planted_licensor_change_on_pdf_record_fails(self) -> None:
+        records_dir = DATA / "records"
+        check_records(self.records, records_dir)
+        for record_id in PDF_ENGINE_RECORD_IDS:
+            with self.subTest(record_id=record_id):
+                planted = json.loads(self.data.decode("utf-8"))
+                entry = next(
+                    item for item in planted["entries"] if item["entry_id"] == record_id
+                )
+                entry["licensors"][0]["name"] = "Planted Licensor Inc."
+                generated = generate_records(
+                    planted, pin=self.pin, texts_dir=self.texts_dir
+                )
+                changed = {record.id: record for record in generated}[record_id]
+                self.assertEqual(changed.licensor, "Planted Licensor Inc.")
+                self.assertNotEqual(changed.licensor, self.by_id[record_id].licensor)
+                with self.assertRaises(HandEditedRecord) as caught:
+                    check_records(generated, records_dir)
+                listed = str(caught.exception).split(": ", 1)[1].split(", ")
+                self.assertEqual(listed, [record_filename(record_id)])
+
+    def test_hand_edited_pdf_record_is_refused(self) -> None:
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-license-pdf-hand-edit-"))
+        dest = scratch / "src" / "kilix_license" / "data"
+        shutil.copytree(DATA, dest)
+        for record_id in PDF_ENGINE_RECORD_IDS:
+            planted = dest / "records" / record_filename(record_id)
+            payload = json.loads(planted.read_text(encoding="utf-8"))
+            payload["licensor"] = "Planted Licensor"
+            planted.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+        result = _run_generator("--check", "--root", str(scratch))
+        self.assertNotEqual(result.returncode, 0)
+        for record_id in PDF_ENGINE_RECORD_IDS:
+            self.assertIn(record_filename(record_id), result.stderr)
+
+    def test_pdf_decision_class_is_generated_not_typed(self) -> None:
+        for record_id in PDF_ENGINE_RECORD_IDS:
+            with self.subTest(record_id=record_id):
+                entry = self.entries[record_id]
+                record = self.by_id[record_id]
+                # Permissive, no binding condition: LIC2's rule still yields
+                # affirmative because Apache-2.0 and MIT condition use.
+                self.assertEqual(entry["binding_conditions"], [])
+                self.assertEqual(record.binding_conditions, ())
+                self.assertEqual(decision_class_for_entry(entry), "affirmative")
+                self.assertEqual(record.decision_class, "affirmative")
+                stripped = copy.deepcopy(entry)
+                stripped["agreement"] = None
+                generated = record_from_entry(
+                    stripped, pin=self.pin, texts_dir=self.texts_dir
+                )
+                self.assertEqual(generated.decision_class, "affirmative")
+                typed = copy.deepcopy(entry)
+                typed["agreement"]["decision_class"] = "informational"
+                with self.assertRaises(ValueError):
+                    record_from_entry(typed, pin=self.pin, texts_dir=self.texts_dir)
+                with self.assertRaises(AgreementRequired):
+                    capture_agreement(record)
+                line = typed_agreement_line(record)
+                self.assertIn(record_id, line)
+                self.assertEqual(capture_agreement(record, line).decision, "accept")
+
+    def test_card_only_grants_show_canonical_text_without_a_supplied_holder(self) -> None:
+        apache = {self.by_id[r].text_sha256 for r in ("granite-docling-258m", "granite-vision-4.1-4b")}
+        self.assertEqual(apache, {self.by_id["small-en-us"].text_sha256})
+        mit = (self.texts_dir / self.by_id["documentfigureclassifier-v2.5"].text_sha256).read_bytes()
+        self.assertTrue(mit.startswith(b"MIT License\n"))
+        holders = [line for line in mit.splitlines() if line.startswith(b"Copyright")]
+        self.assertEqual(holders, [b"Copyright (c) <year> <copyright holders>"])
+        for digest in apache:
+            text = (self.texts_dir / digest).read_bytes()
+            holders = [line.strip() for line in text.splitlines() if b"Copyright" in line and b"[" in line]
+            self.assertEqual(holders, [b"Copyright [yyyy] [name of copyright owner]"])
+
+    def test_no_record_for_refused_or_out_of_scope_pdf_models(self) -> None:
+        for record_id in self.by_id:
+            for word in ("datalab", "surya", "marker", "gonoto", "chart2csv", "mlx"):
+                self.assertNotIn(word, record_id.lower())
+        refused = [
+            item
+            for item in self.payload["not_entries"]
+            if "OD-AY" in str(item.get("reason", ""))
+        ]
+        self.assertEqual(len(refused), 2)
+        for item in refused:
+            self.assertNotIn(item["entry_id"], self.by_id)

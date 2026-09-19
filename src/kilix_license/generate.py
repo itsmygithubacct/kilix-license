@@ -1,8 +1,9 @@
 """Generate licence records from the pinned determinations JSON.
 
 Licence file bytes are never retyped: they are copied into data/texts/
-named by sha256. Quote-backed texts are the JSON `text` field, which R0-DET-R2
-cut from cited source spans. A hand-edited committed record fails --check.
+named by sha256. Quote-backed texts are the JSON `text` field, which the
+determinations generator (R0-DET-R2; R3 for the OD-AY PDF-engine entries) cut
+from cited source spans. A hand-edited committed record fails --check.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ RECORDS_DIRNAME = "records"
 CONVERTER_ID = "encodec-converter-runtime-code"
 CONVERTER_TEXT_ROLE = "code-relicensing-notice"
 FORBIDDEN_PREFIXES = ("kilix-llm",)
-# Same id set generate.py (R0-DET-R2) used so records equal the JSON.
+# Same id set the determinations generator (R0-DET-R2, R3) used so records equal the JSON.
 CONDITIONING_IDS = frozenset(
     {
         "Apache-2.0",
@@ -39,6 +40,13 @@ CONDITIONING_IDS = frozenset(
         "CC-BY-NC-4.0",
         "LicenseRef-Meta-Llama-3-Community-License",
     }
+)
+# OD-AY "Granite only": P1, N1 and N2 get records. The Datalab/Surya models
+# (P2-P6), the F1 font, N3 and N4 do not.
+PDF_ENGINE_RECORD_IDS = (
+    "granite-docling-258m",
+    "documentfigureclassifier-v2.5",
+    "granite-vision-4.1-4b",
 )
 REQUIRED_RECORD_IDS = (
     "small-en-us",
@@ -66,6 +74,8 @@ REQUIRED_RECORD_IDS = (
     "encodec-24khz-stateful",
     "encodec-48khz-frame",
     CONVERTER_ID,
+    # OD-AY (R4-047): the kilix-pdf-conversion [granite] engine models only.
+    *PDF_ENGINE_RECORD_IDS,
 )
 _NON_ID = re.compile(r"[^a-z0-9._:-]+")
 _QUOTE_KEYS = (
