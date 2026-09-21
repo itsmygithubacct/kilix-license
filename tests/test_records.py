@@ -25,6 +25,7 @@ from kilix_license.errors import (
 )
 from kilix_license.generate import (
     ADVISORY_NOTE_AUTHORED,
+    ADVISORY_NOTE_AUTHORED_PIN,
     ADVISORY_NOTE_AUTHORED_SHA256,
     ADVISORY_TEXT_SOURCES,
     ADVISORY_TEXTS,
@@ -67,10 +68,20 @@ from kilix_license.screen import render_screen
 from kilix_license.texts import TextStore
 
 from fake_store import FakeStore
+from source_pins import literal_constant
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = data_dir()
 GENERATOR = ROOT / "tools" / "generate_records.py"
+GENERATE_PY = ROOT / "src" / "kilix_license" / "generate.py"
+
+# LIC6-FIX-VERIFY V1. The authored text of the one shipped advisory note,
+# digested. TYPED here, and typed again in ADVISORY_NOTE_AUTHORED_PIN in
+# src/kilix_license/generate.py: two files, neither figure derived from the
+# note, so a declaration computed from the note file cannot satisfy either.
+# Change it only in the same commit as a deliberate note edit, as step 2 of
+# the path README.md and every refusal state.
+AUTHORED_PIN = "120dc2042a48e4d793d47dd4653ad0f52e7d27d443a2b9b3776a8b40bb67f5c8"
 
 
 def tracked_files() -> set[str]:
@@ -931,6 +942,78 @@ class AdvisoryNoteTests(unittest.TestCase):
         self.assertEqual(tuple(line for _n, line in authored), tuple(declared))
         check_advisory_note_authored(self.note_digest, authored)
 
+        # ---- the assertion above cannot be allowed to become a tautology ----
+        # LIC6-FIX-VERIFY V1, mutant M10: the same defect one level up. Both
+        # sides of that equality are objects, and M10 made the declaration
+        # derive from the note file -- a 12-line helper and
+        # `{d: _authored_from_file(d) for d in ADVISORY_NOTE_AUTHORED}` -- so
+        # the note was compared with itself. `make records` exited 0, the
+        # suite stayed green, a false permissive sentence rendered on both
+        # EnCodec screens, and zero added lines outside the digest-named blob
+        # contained it. Asserting harder about the imported object cannot
+        # help: the imported object is what the mutant controls.
+        #
+        # So, two anchors that a derived declaration cannot reach.
+        #
+        # 1. The declaration is a LITERAL in the source, read out of the file
+        #    with ast and never imported. A comprehension, a call, or a second
+        #    module-level assignment that replaces it fails here.
+        source_declaration = literal_constant(GENERATE_PY, "ADVISORY_NOTE_AUTHORED")
+        self.assertEqual(
+            {k: tuple(v) for k, v in source_declaration.items()},
+            {k: tuple(v) for k, v in ADVISORY_NOTE_AUTHORED.items()},
+            "the imported declaration is not what generate.py has written in "
+            "it; a pin satisfied by a computed value is not a pin",
+        )
+        for lines in source_declaration.values():
+            self.assertTrue(
+                lines and all(isinstance(line, str) for line in lines),
+                "a declared note's authored text must be literal strings",
+            )
+        # 2. Its content hashes to a figure TYPED in two files, neither of
+        #    them derived from the note. A declaration computed from the note
+        #    would have to hash to this, and the moment the note changes it
+        #    does not.
+        source_pin = literal_constant(GENERATE_PY, "ADVISORY_NOTE_AUTHORED_PIN")
+        self.assertEqual(source_pin, dict(ADVISORY_NOTE_AUTHORED_PIN))
+        self.assertEqual(
+            ADVISORY_NOTE_AUTHORED_PIN[self.note_digest],
+            AUTHORED_PIN,
+            "generate.py's pin and the suite's typed copy disagree. Both are "
+            "step 2 of the deliberate path: put the digest the generator "
+            "printed in ADVISORY_NOTE_AUTHORED_PIN and in AUTHORED_PIN above.",
+        )
+        self.assertEqual(
+            literal_constant(Path(__file__), "AUTHORED_PIN"),
+            AUTHORED_PIN,
+            "the suite's own copy of the pin must be typed, not computed",
+        )
+        self.assertEqual(authored_digest(authored), AUTHORED_PIN)
+        self.assertEqual(
+            hashlib.sha256(
+                b"".join(
+                    f"{line}\n".encode("utf-8")
+                    for line in source_declaration[self.note_digest]
+                )
+            ).hexdigest(),
+            AUTHORED_PIN,
+            "the lines written in generate.py do not hash to the pinned "
+            "digest; this is the arm a derived declaration fails",
+        )
+        # and the generator enforces it, so `make records` refuses too, not
+        # only this test: a pin whose declaration hashes to anything else.
+        with self.assertRaises(ValueError) as caught:
+            check_advisory_note_authored(
+                self.note_digest,
+                authored,
+                {self.note_digest: tuple(declared) + ("smuggled line.",)},
+            )
+        self.assertIn("does not match its pinned digest", str(caught.exception))
+        with self.assertRaises(ValueError) as caught:
+            check_advisory_note_authored(self.note_digest, authored, None, {})
+        self.assertIn("no pinned digest", str(caught.exception))
+        # ---- end of the non-vacuity guard ----
+
         # The digest is derived from the declaration, never typed, so the
         # declaration and the digest cannot drift apart.
         self.assertEqual(
@@ -940,9 +1023,17 @@ class AdvisoryNoteTests(unittest.TestCase):
             hashlib.sha256(authored_text(authored)).hexdigest(),
             ADVISORY_NOTE_AUTHORED_SHA256[self.note_digest],
         )
-        # Every shipped note is pinned, not just this one.
+        self.assertEqual(
+            ADVISORY_NOTE_AUTHORED_SHA256[self.note_digest],
+            ADVISORY_NOTE_AUTHORED_PIN[self.note_digest],
+            "the derived digest and the typed pin disagree",
+        )
+        # Every shipped note is pinned, not just this one -- in both tables.
         self.assertEqual(
             sorted(ADVISORY_TEXTS.values()), sorted(ADVISORY_NOTE_AUTHORED)
+        )
+        self.assertEqual(
+            sorted(ADVISORY_TEXTS.values()), sorted(ADVISORY_NOTE_AUTHORED_PIN)
         )
 
         # m11b itself, in the preamble: refused, and the refusal names the one
@@ -1034,6 +1125,12 @@ class AdvisoryNoteTests(unittest.TestCase):
         ), mock.patch.dict(
             "kilix_license.generate.ADVISORY_NOTE_AUTHORED",
             {digest: ADVISORY_NOTE_AUTHORED[self.note_digest]},
+        ), mock.patch.dict(
+            # V1: the declaration's own digest, declared for the renamed note
+            # too, so what this test asserts is the note-vs-declaration
+            # refusal and not the missing-pin one that now precedes it.
+            "kilix_license.generate.ADVISORY_NOTE_AUTHORED_PIN",
+            {digest: ADVISORY_NOTE_AUTHORED_PIN[self.note_digest]},
         ):
             with self.assertRaises(ValueError) as caught:
                 generate_records(self.payload, pin=self.pin, texts_dir=texts)
@@ -1186,6 +1283,9 @@ class AdvisoryNoteTests(unittest.TestCase):
             # refusal this test is about is the one it asserts.
             "kilix_license.generate.ADVISORY_NOTE_AUTHORED",
             {digest: ADVISORY_NOTE_AUTHORED[self.note_digest]},
+        ), mock.patch.dict(
+            "kilix_license.generate.ADVISORY_NOTE_AUTHORED_PIN",
+            {digest: ADVISORY_NOTE_AUTHORED_PIN[self.note_digest]},
         ):
             with self.assertRaises(ValueError) as caught:
                 generate_records(self.payload, pin=self.pin, texts_dir=texts)

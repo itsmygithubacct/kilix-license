@@ -342,6 +342,71 @@ class ReceiptStoreRootTests(unittest.TestCase):
         self.assertEqual(read["outcome"], "COVERED", read)
         self.assertEqual(read["root"], str(elsewhere))
 
+    def test_an_unset_empty_or_relative_home_still_gives_an_absolute_root(
+        self,
+    ) -> None:
+        # LIC6-FIX-VERIFY V2, mutant M26. Nothing covered $HOME unset, empty
+        # or relative at all, and with $HOME relative the root came out
+        # relative: it then resolved against each process's working
+        # directory, so a writer and a reader agreeing on every variable
+        # filed and looked in different places and the gate refused after
+        # consent -- F1's own symptom, in the environment F1's fix
+        # introduced. $GPU_TERMINAL_HOME and $KILIX_LICENSE_RECEIPTS already
+        # go through _absolute(); this was the one path that skipped it.
+        #
+        # voicelib composes os.path.abspath(os.path.expanduser(value)), so
+        # its two lines are reproduced here in full -- including the
+        # abspath the earlier arm of this file leaves out -- and compared as
+        # strings. No store is constructed in any arm: these roots resolve
+        # under the invoking user's own home, which this suite never writes.
+        def voicelib_root() -> str:
+            home = os.path.abspath(
+                os.path.expanduser(
+                    os.environ.get(STACK_HOME_ENV)
+                    or os.path.join(
+                        os.path.expanduser("~"), ".local", "gpu_terminal"
+                    )
+                )
+            )
+            return os.path.join(home, "license-receipts")
+
+        base = {k: v for k, v in os.environ.items()
+                if k not in (STACK_HOME_ENV, RECEIPT_STORE_ENV)}
+        for name, home in (
+            ("unset", None),
+            ("empty", ""),
+            ("relative", "relhome"),
+            ("relative-dotted", os.path.join(".", "rel", "..", "relhome")),
+        ):
+            with self.subTest(home=name):
+                environment = dict(base)
+                environment.pop("HOME", None)
+                if home is not None:
+                    environment["HOME"] = home
+                with mock.patch.dict(os.environ, environment, clear=True):
+                    self.assertTrue(
+                        user_home().is_absolute(),
+                        f"$HOME={home!r} gave a relative home {user_home()}",
+                    )
+                    self.assertTrue(receipt_store_root().is_absolute())
+                    self.assertEqual(str(receipt_store_root()), voicelib_root())
+                    self.assertEqual(
+                        stack_home(), user_home().joinpath(*STACK_HOME_DIRS)
+                    )
+                    if home is None:
+                        # The convention with $HOME unset is the passwd home,
+                        # which is what expanduser falls back to. Reading the
+                        # variable raw composes a root under the current
+                        # working directory instead (mutant M26).
+                        self.assertEqual(user_home(), nss_home())
+                    elif home == "":
+                        self.assertEqual(user_home(), Path(os.sep))
+                    else:
+                        self.assertEqual(
+                            user_home(), Path(os.path.abspath("relhome"))
+                        )
+                        self.assertNotEqual(user_home(), Path("relhome"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -205,6 +205,18 @@ network sandbox run it as `make check OFFLINE=1`: `uv build` otherwise
 resolves the PEP 517 build backend over the network, which uv.lock does not
 pin, and the gate fails with a name-resolution error rather than a defect.
 
+### Changing this file
+
+This file's prose is pinned by digest in `tests/test_identity.py`
+(whitespace-normalised, so re-wrapping is free and any change to a word is
+not). OD-BC's shipping rule is a rule nothing here can enforce except by
+being read, and such a rule is reversed just as easily by adding a sentence
+elsewhere in the document as by editing the sentence itself - so the
+document is constrained rather than screened for the wording of an
+exception, which is the same choice the authored-note prose forced. Edit
+the prose and update `README_NORMALISED_SHA256`; the failure prints the
+value to put there.
+
 ### Checking an advisory note against the evidence packets
 
 An advisory note's quoted source is pinned twice inside this tree - the
@@ -235,15 +247,30 @@ work, because a false sentence can be written in plain English; the
 constraint is equality with a declaration, so a new or altered authored
 sentence is refused whatever it says.
 
+The declaration is itself pinned, by a digest typed beside it in
+`ADVISORY_NOTE_AUTHORED_PIN`. Without that, the declaration could be made to
+derive from the note file - and then the note would be compared with itself,
+the suite would stay green, and a new sentence would reach a consent screen
+with nothing in the diff to read. The pin is typed and never computed, and
+the suite requires the declaration to be a literal in the source, so a
+computed declaration is refused rather than satisfied.
+
 To change it deliberately, in one place:
 
 1. edit the note under `src/kilix_license/data/texts/` and rename it to its
    new sha256;
 2. copy its authored lines - in note order, blank lines omitted - into
-   `ADVISORY_NOTE_AUTHORED` under the new digest;
+   `ADVISORY_NOTE_AUTHORED` under the new digest, and put the declaration's
+   own sha256 in `ADVISORY_NOTE_AUTHORED_PIN` beside it **and** in
+   `AUTHORED_PIN` in `tests/test_records.py`, the suite's independently
+   typed copy of the same figure (every refusal prints the value);
 3. point `ADVISORY_TEXTS` and `ADVISORY_TEXT_SOURCES` at the new digest;
-4. run `make records`.
+4. run `make regenerate`, which **writes** the records - `make records` is
+   `--check` and refuses until they are written;
+5. `git add -A`, because three tests read the committed tree and the renamed
+   note is a new path, then run `make check`.
 
-The generator's refusal states those four steps. Widening a detector is not
-an alternative: a sentence absent from that declaration never reaches a
-user.
+The generator's refusals state those five steps, including the two an editor
+meets first: the digest mismatch before the rename, and the missing file just
+after it. Widening a detector is not an alternative: a sentence absent from
+that declaration never reaches a user.

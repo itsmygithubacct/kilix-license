@@ -1,4 +1,4 @@
-.PHONY: sync test build check hygiene records notes notes-guarded
+.PHONY: sync test build check hygiene records regenerate notes notes-guarded
 
 UV ?= uv
 PYTHON_VERSION ?= 3.12.8
@@ -71,6 +71,15 @@ build:
 records:
 	$(UV) run --frozen --no-sync --python $(PYTHON_VERSION) \
 		python tools/generate_records.py --check
+
+# LIC6-FIX-VERIFY V3. `records` is --check: it compares the committed records
+# with generator output and never writes, so the documented path for changing
+# an advisory note ended in a refusal rather than a landed edit. This is the
+# step that writes. It is deliberately not part of `check`: a gate must fail
+# on a hand-edited record, not silently rewrite it.
+regenerate:
+	$(UV) run --frozen --no-sync --python $(PYTHON_VERSION) \
+		python tools/generate_records.py
 
 # LIC6-VERIFY F4 (mutant m8b). An advisory note's quoted source is pinned
 # twice inside this tree -- the source file and the evidence packet's own

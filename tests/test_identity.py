@@ -8,8 +8,19 @@ import unittest
 
 import kilix_license
 
+from source_pins import literal_constant
+
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# LIC6-FIX-VERIFY V5, mutants M20 and M21. sha256 of README.md with runs of
+# whitespace collapsed to one space, so re-wrapping the file is free and
+# changing a word is not. See test_the_shipping_rule_is_written_where_a_reader
+# _meets_it, arm 4, for why a rule stated in prose needs this rather than a
+# longer list of forbidden phrases. TYPED; the failure prints the new value.
+README_NORMALISED_SHA256 = (
+    "b5779ce6d340d5c3a1d75b5057d23f585ed5c2bed36625b24238f13da1744e3e"
+)
 
 RECOGNISED_DISPOSITIONS = {"LOCAL_ONLY", "PUBLISHED"}
 RECOGNISED_AUTHORIZATIONS = {"AUTHORIZED", "UNRESOLVED"}
@@ -165,6 +176,40 @@ class RepositoryIdentityTests(unittest.TestCase):
                     f"README.md contains {forbidden!r}, which reads as a "
                     "shipped receipt being permitted. OD-BC permits none.",
                 )
+
+        # 4. And what no list of forbidden phrases can reach: reversal by
+        #    ADDITION. LIC6-FIX-VERIFY V5 planted two exceptions that leave
+        #    every sentence above intact and every phrase below absent --
+        #    M20, a paragraph under "## Publication status" permitting a
+        #    release image to carry a receipt accepted once for the fleet,
+        #    and M21, the same exception one sentence after the pinned rule
+        #    inside the pinned section. Both shipped green. A third would be
+        #    worded differently again, because "a sentence that reverses this
+        #    rule" is not a vocabulary, exactly as "a sentence a reader
+        #    believes" was not one for the advisory note (V1/F3).
+        #
+        #    So the document is constrained rather than screened: its prose
+        #    is pinned by digest, whitespace-normalised so re-wrapping is
+        #    free. Any added, removed or altered word fails here, wherever in
+        #    the file it is, and a deliberate edit is one typed line plus a
+        #    diff a reviewer reads. The digest is typed, and required to be a
+        #    literal in this file, so it cannot quietly become derived from
+        #    the document it pins (V1's mutant M10, one level up again).
+        self.assertEqual(
+            literal_constant(Path(__file__), "README_NORMALISED_SHA256"),
+            README_NORMALISED_SHA256,
+        )
+        self.assertEqual(
+            hashlib.sha256(readme.encode("utf-8")).hexdigest(),
+            README_NORMALISED_SHA256,
+            "README.md's prose changed. Nothing in this repository can "
+            "enforce OD-BC's shipping rule except that the document states "
+            "it, and a stated rule is reversed as easily by a sentence added "
+            "elsewhere as by an edit to the sentence itself, so the prose is "
+            "pinned rather than screened. If the change is deliberate, put "
+            "the digest printed above in README_NORMALISED_SHA256 in the "
+            "same commit; it is meant to be read alongside the diff.",
+        )
 
         for required in (
             "never shipped, vendored or provisioned",

@@ -421,9 +421,23 @@ class AuthorityTests(unittest.TestCase):
         index = __import__(
             "kilix_license.records", fromlist=["RecordIndex"]
         ).RecordIndex([self.fixtures.pocket])
-        with self.assertRaises(ReceiptShapeError) as caught:
+        # LIC6-FIX-VERIFY V4. Typing the failure was not the whole of it. The
+        # consumer this was raised about, kilix_content.first_use
+        # .needs_agreement(), catches CoverageRefused only, and
+        # ReceiptShapeError is not one -- so at the LIC6 head the first-use
+        # flow still showed a traceback and only the class in it had changed.
+        # A file this authority cannot read as a receipt covers nothing, so
+        # require() refuses with the class the consumer catches, chaining the
+        # shape error so a corrupt store stays diagnosable. parse_receipt_bytes
+        # above is unchanged: the typed contract inside the authority is what
+        # it was.
+        from kilix_license.errors import CoverageRefused
+
+        with self.assertRaises(CoverageRefused) as refused:
             require(ref, records=index, store=self.store)
-        self.assertEqual(caught.exception.field, "receipt")
+        self.assertEqual(refused.exception.field, "receipt")
+        self.assertIsInstance(refused.exception.__cause__, ReceiptShapeError)
+        self.assertEqual(refused.exception.__cause__.field, "receipt")
 
     def test_receipt_from_agreement_requires_named_binding_ids(self) -> None:
         agreement = capture_agreement(

@@ -89,9 +89,40 @@ def require(
     See ``README.md``.
     """
     record = records.by_digest(asset.record_digest)
-    receipt = store.lookup(asset.record_digest, asset.manifest_digest)
+    # LIC6-FIX-VERIFY V4. A malformed file in the store used to leave this
+    # function by raising, and the consumer that asks the question --
+    # kilix_content.first_use.needs_agreement() -- catches CoverageRefused
+    # only, so one truncated write or half-restored backup turned the
+    # first-use flow into a traceback rather than a refusal. LIC6 typed the
+    # failure (ReceiptShapeError instead of TypeError or ValueError) but that
+    # class is not a CoverageRefused either, so the symptom was unchanged.
+    #
+    # A file this authority cannot read as a receipt covers nothing, so that
+    # is what require() says. Fail-closed and unchanged in effect: no weights
+    # are fetched, the caller shows the licence and asks for consent. The
+    # typed contract inside the authority is untouched -- parse_receipt_bytes
+    # and parse_receipt still raise ReceiptShapeError, and the original is
+    # chained here and named in the message, so a corrupt store is still
+    # diagnosable.
+    #
+    # What this does NOT close, said plainly: the pre-existing family of bare
+    # `ValueError` escapes out of the LIC4/LIC5 digest-map and text-id helpers
+    # (advisory_digests, statement_digests, binding_text_ids,
+    # component_exception_digests, catalogue_digest, release_digest,
+    # licence_text_id) still leave this function untyped. They are identical
+    # at 417b0c2d, c002be26 and 1a3bc477, so nothing regressed; closing them
+    # changes the failure contract of seven fields at once and is its own
+    # wave, with its own require() differential.
+    try:
+        receipt = store.lookup(asset.record_digest, asset.manifest_digest)
+        others = () if receipt is not None else store.for_record(asset.record_digest)
+    except ReceiptShapeError as error:
+        raise CoverageRefused(
+            error.field,
+            "a file in the receipt store is not a receipt this authority can "
+            f"read, so nothing there covers this asset: {error}",
+        ) from error
     if receipt is None:
-        others = store.for_record(asset.record_digest)
         if others:
             raise CoverageRefused("manifest_digest")
         raise CoverageRefused("receipt")

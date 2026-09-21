@@ -4,6 +4,46 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- The authored-text **declaration is itself pinned**, by a digest typed in
+  `ADVISORY_NOTE_AUTHORED_PIN` beside it and typed again in the suite. The
+  declaration pinned the note; nothing pinned the declaration, so replacing
+  the literal with a comprehension that read the note's authored lines off
+  disk made the check compare the note with itself: `make records` exited
+  0, the suite stayed green, a false permissive sentence reached both
+  EnCodec consent screens, and no added line outside the digest-named blob
+  contained it - the test named after the property had become a tautology.
+  The generator refuses a declaration that does not hash to its typed pin,
+  and the suite reads the declaration out of the source with `ast` and
+  refuses anything that is not a literal, so a computed declaration fails
+  rather than satisfying the pin.
+- The documented path for changing what this authority says on a consent
+  screen now lands a change. Step 4 was `make records`, which is
+  `--check` and never writes, and a `git add` of the renamed note was
+  needed by three tests that read the committed tree and was stated
+  nowhere. There are five steps, `make regenerate` writes the records, and
+  the two refusals an editor meets first - the digest mismatch before the
+  rename and the missing file just after it - now state them too.
+- With a **relative** `$HOME` the receipt store root was relative, so it
+  resolved against each process's working directory and a writer and a
+  reader agreeing on every variable still disagreed on the store. `$HOME`
+  is made absolute exactly as `voicelib` makes it absolute, which is the
+  one path that skipped the absolutisation `$GPU_TERMINAL_HOME` and
+  `$KILIX_LICENSE_RECEIPTS` already had. `$HOME` unset, empty and relative
+  are covered.
+- A file in the receipt store that this authority cannot read as a receipt
+  is refused as `CoverageRefused` from `require()` rather than raised out
+  of it. Typing the failure was not enough on its own: the consumer that
+  asks the question catches `CoverageRefused` only, so one truncated write
+  still turned a first-use flow into a traceback instead of a refusal. The
+  typed contract inside the authority is unchanged, the shape error is
+  chained and named, and no weights are fetched either way.
+- `README.md`'s prose is pinned by digest, whitespace-normalised. A rule
+  nothing can enforce except by being read is reversed as easily by a
+  sentence added elsewhere in the document as by an edit to the sentence
+  itself, and two such additions - an exception under "Publication status",
+  and an exception one sentence after the rule - left every pinned sentence
+  and every forbidden phrase intact. Re-wrapping stays free; any changed
+  word is one typed line and a diff.
 - Authored advisory-note prose is **pinned, not screened**. A note's own
   lines - its preamble and each block's three header lines - were checked
   by a detector that looked for licence identifiers and the language of

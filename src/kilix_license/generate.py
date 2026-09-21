@@ -298,11 +298,42 @@ ADVISORY_NOTE_AUTHORED_SHA256 = {
     digest: sha256_hex(_authored_bytes(tuple(lines)))
     for digest, lines in ADVISORY_NOTE_AUTHORED.items()
 }
+# LIC6-FIX-VERIFY V1, mutant M10 -- the same defect one level up. The
+# declaration above pins the note. Nothing pinned the declaration. M10 left
+# every check in place and replaced the literal with a comprehension that
+# reads the authored lines straight off the note file, so equality held by
+# construction: `make records` exited 0, the suite stayed green, a false
+# permissive sentence rendered on both EnCodec consent screens, and **no**
+# added line outside the digest-named blob contained it. The test named after
+# the property had become a tautology, which is this programme's recurring
+# failure mode -- two things derived from one source, compared with each other.
+#
+# So the declaration's own content is pinned, by a digest that is TYPED here
+# and derived nowhere. A declaration computed from the note cannot satisfy it:
+# whatever it computes must hash to this figure, and the moment the note
+# changes it does not. check_advisory_note_authored() enforces it, so the
+# GENERATOR refuses, not only a test; and the suite additionally requires the
+# declaration to be a literal in this file (tests/support/source_pins.py), so
+# the pin cannot be satisfied by making the pinned thing computed.
+#
+# Updating it is one line, it is step 2 of the deliberate path below, and
+# every refusal here prints the value to put in it.
+ADVISORY_NOTE_AUTHORED_PIN = {
+    "8cfc463c41113f776eebc60642a0e4f9841aaff247d9659d8abc466743755260": (
+        "120dc2042a48e4d793d47dd4653ad0f52e7d27d443a2b9b3776a8b40bb67f5c8"
+    ),
+}
 # The one place an authored line is declared, named in every refusal so the
 # deliberate path is the obvious one.
 AUTHORED_DECLARATION = (
     "ADVISORY_NOTE_AUTHORED in src/kilix_license/generate.py"
 )
+# LIC6-FIX-VERIFY V3. The four steps as they stood did not land a change:
+# step 4 was `make records`, which is generate_records.py --check and never
+# writes, so it refused; and a `git add` of the renamed note was needed by
+# three tests that read the committed tree and was stated nowhere. An editor
+# who followed them exactly got a refusal and then three failures. These five
+# were walked end to end, in order, on a real wording change.
 _AUTHORED_UPDATE = (
     f"Authored note prose is pinned, not screened: every line of a note that "
     f"nobody upstream wrote must appear byte for byte in "
@@ -312,8 +343,15 @@ _AUTHORED_UPDATE = (
     f"src/kilix_license/data/texts/ and rename it to its new sha256; "
     f"(2) copy its authored lines -- the preamble and each block's three "
     f"header lines, in note order, blank lines omitted -- into "
-    f"{AUTHORED_DECLARATION} under the new digest; (3) point ADVISORY_TEXTS "
-    f"and ADVISORY_TEXT_SOURCES at the new digest; (4) run `make records`. "
+    f"{AUTHORED_DECLARATION} under the new digest, and put the declaration's "
+    f"own sha256, which this refusal prints, in ADVISORY_NOTE_AUTHORED_PIN "
+    f"beside it AND in AUTHORED_PIN in tests/test_records.py, which is the "
+    f"suite's independently typed copy of it; (3) point ADVISORY_TEXTS and "
+    f"ADVISORY_TEXT_SOURCES at the "
+    f"new digest; (4) run `make regenerate`, which WRITES the records -- "
+    f"`make records` only checks them and refuses until they are written; "
+    f"(5) `git add -A`, because the suite reads the committed tree and the "
+    f"renamed note is a new path, then `make check`. "
     f"Do not widen a detector instead: a sentence absent from that "
     f"declaration never reaches a user, whatever its wording."
 )
@@ -488,12 +526,21 @@ def licensors_of(entry: Mapping[str, Any]) -> str:
 
 
 def load_text_file(texts_dir: Path, digest: str, label: str) -> bytes:
+    # LIC6-FIX-VERIFY V3. These two are the first refusals an editor changing
+    # an advisory note actually meets -- the digest mismatch before the
+    # rename, and the missing file just after it -- and neither said how to
+    # land the change; only the third refusal, two steps later, named the
+    # path. Both point at it now, for advisory texts, which are the only ones
+    # a human edits.
+    hint = f" {_AUTHORED_UPDATE}" if label.startswith("advisory:") else ""
     path = texts_dir / digest
     if not path.is_file():
-        raise FileNotFoundError(f"missing licence text {digest} ({label})")
+        raise FileNotFoundError(f"missing licence text {digest} ({label}).{hint}")
     data = path.read_bytes()
     if sha256_hex(data) != digest:
-        raise TextDigestMismatch(f"{label} {digest} does not match stored bytes")
+        raise TextDigestMismatch(
+            f"{label} {digest} does not match stored bytes.{hint}"
+        )
     return data
 
 
@@ -841,6 +888,7 @@ def check_advisory_note_authored(
     digest: str,
     authored: tuple[tuple[int, str], ...],
     table: Mapping[str, tuple[str, ...]] | None = None,
+    pins: Mapping[str, str] | None = None,
 ) -> None:
     """Refuse a note whose authored text is not the text declared for it.
 
@@ -856,6 +904,12 @@ def check_advisory_note_authored(
     re-derivation from their named source, so text appended after the last
     block is still swallowed into that block's quoted bytes and still fails
     there (LIC5 mutant M13).
+
+    LIC6-FIX-VERIFY V1 (mutant M10) added the second half: the declaration's
+    own content is checked against a **typed** digest before the note is
+    compared with it, so a declaration that is derived from the note file --
+    which makes the comparison below a tautology -- is refused here, in the
+    generator, whatever the note says.
     """
     if table is None:
         table = ADVISORY_NOTE_AUTHORED
@@ -866,6 +920,27 @@ def check_advisory_note_authored(
             + _AUTHORED_UPDATE
         )
     declared = tuple(declared_lines)
+    # V1, before anything is compared with the note: the declaration itself.
+    if pins is None:
+        pins = ADVISORY_NOTE_AUTHORED_PIN
+    pinned = pins.get(digest)
+    declared_digest = sha256_hex(_authored_bytes(declared))
+    if pinned is None:
+        raise ValueError(
+            f"advisory note {digest} has an authored declaration with no "
+            f"pinned digest. Its declared text hashes to {declared_digest}; "
+            f"that is the value to put in ADVISORY_NOTE_AUTHORED_PIN. "
+            + _AUTHORED_UPDATE
+        )
+    if declared_digest != pinned:
+        raise ValueError(
+            f"advisory note {digest} authored declaration does not match its "
+            f"pinned digest: the declaration hashes to {declared_digest} and "
+            f"ADVISORY_NOTE_AUTHORED_PIN declares {pinned}. The pin is typed, "
+            f"never derived, so a declaration computed from the note file "
+            f"fails here instead of agreeing with the note by construction. "
+            + _AUTHORED_UPDATE
+        )
     found = tuple(line for _number, line in authored)
     if found == declared:
         return
@@ -1093,7 +1168,10 @@ def check_advisory_texts(
     # LIC6-FIX (LIC6-VERIFY F3): and a note whose own authored prose is
     # undeclared is unchecked prose on a consent screen, so it is refused
     # here too rather than reaching a screen as a new, unpinned note.
-    unpinned = sorted(set(table.values()) - set(ADVISORY_NOTE_AUTHORED))
+    # V1: a note needs both halves -- the declaration and the typed digest of
+    # the declaration -- or the pin is satisfied by whatever computes it.
+    pinned_notes = set(ADVISORY_NOTE_AUTHORED) & set(ADVISORY_NOTE_AUTHORED_PIN)
+    unpinned = sorted(set(table.values()) - pinned_notes)
     if unpinned:
         raise ValueError(
             f"advisory replacement texts declare no authored text: {unpinned}. "

@@ -54,14 +54,30 @@ def nss_home() -> Path:
 
 
 def user_home() -> Path:
-    """``$HOME``, exactly as the rest of the stack reads it.
+    """``$HOME``, made absolute, exactly as the rest of the stack reads it.
 
     ``os.path.expanduser("~")`` is byte-for-byte what
-    ``voicelib.paths.gpu_terminal_home()`` calls, and falls back to ``pw_dir``
+    ``voicelib.paths.gpu_terminal_home()`` reads, and falls back to ``pw_dir``
     itself when ``$HOME`` is unset, so the two agree in every environment
     where the stack's own convention agrees with itself.
+
+    LIC6-FIX-VERIFY V2: voicelib puts that through
+    ``os.path.abspath(os.path.expanduser(value))`` and this did not, so a
+    **relative** ``$HOME`` composed a relative root. A relative root resolves
+    against each process's working directory, so a writer and a reader that
+    agreed on every variable still filed and looked in different places, and
+    the gate refused after consent -- F1's symptom again, in the one
+    environment F1's own fix introduced. ``$GPU_TERMINAL_HOME`` and
+    ``$KILIX_LICENSE_RECEIPTS`` already go through :func:`_absolute`; this
+    was the one path that skipped it. It now matches voicelib exactly, so
+    the two sides compose the same string in that environment too.
+
+    ``expanduser`` and not ``os.environ["HOME"]``: with ``$HOME`` unset the
+    stack's convention is the passwd home and with it empty it is ``/``, and
+    reading the variable raw composes a root under the current directory
+    instead of either.
     """
-    return Path(os.path.expanduser("~"))
+    return Path(os.path.abspath(os.path.expanduser("~")))
 
 
 def live_store_root() -> Path:
