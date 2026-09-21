@@ -26,9 +26,11 @@ from kilix_license.errors import (
 from kilix_license.paths import (
     check_receipt_store_root,
     live_store_root,
+    live_store_roots,
     receipt_store_root,
     refuse_live_store,
     stack_home,
+    user_home,
 )
 from kilix_license.receipts import Receipt, receipt_from_agreement
 from kilix_license.records import LicenseRecord, RecordIndex
@@ -66,6 +68,7 @@ __all__ = [
     "load_determined_records",
     "load_determined_texts",
     "live_store_root",
+    "live_store_roots",
     "observe_capture",
     "receipt_from_agreement",
     "receipt_store_root",
@@ -75,4 +78,5 @@ __all__ = [
     "scan_receipts",
     "stack_home",
     "typed_agreement_line",
+    "user_home",
 ]

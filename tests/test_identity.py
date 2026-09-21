@@ -86,6 +86,85 @@ class RepositoryIdentityTests(unittest.TestCase):
         # does not read as a rule that was deleted.
         raw_readme = (ROOT / "README.md").read_text(encoding="utf-8")
         readme = " ".join(raw_readme.split())
+
+        # LIC6-VERIFY F2. The list below binds VOCABULARY: it kills deletion
+        # and nothing else. Reversing the rule in place (v13), relocating the
+        # section to an appendix (v14) and adding a third acceptable outcome
+        # (v17) all left every one of those substrings intact. What follows
+        # binds the RULE.
+        #
+        # 1. Where it is. The heading must stand once, inside the receipts
+        #    section - between "## Where receipts live" and "## Publication
+        #    status" - which is what this test's own docstring always claimed
+        #    and never checked. An appendix at the end of the file fails here.
+        heading = "### A receipt is never shipped"
+        self.assertEqual(
+            raw_readme.count(heading), 1,
+            f"{heading!r} must appear exactly once; two copies let a rule be "
+            "moved while a stale heading satisfies a location check",
+        )
+        opens = raw_readme.index("## Where receipts live")
+        closes = raw_readme.index("## Publication status")
+        where = raw_readme.index(heading)
+        self.assertLess(opens, where, "the rule is above the receipts section")
+        self.assertLess(
+            where, closes,
+            "the rule left the receipts section. OD-BC put it where a reader "
+            "arrives; an appendix at the end of the file is not that place.",
+        )
+
+        # 2. What it says. The three sentences that ARE the rule, each pinned
+        #    whole rather than as a fragment, and each required INSIDE that
+        #    section, so moving the sentences out while leaving the heading
+        #    fails too. Whitespace-normalised, so re-wrapping is still fine.
+        after = raw_readme[where + len(heading):]
+        ends = [
+            index for index in
+            (after.find("\n## "), after.find("\n### "))
+            if index != -1
+        ]
+        section = " ".join(after[: min(ends)].split()) if ends else " ".join(after.split())
+        for sentence in (
+            # Present tense, unqualified, no era and no exception: "Until
+            # 0.2.2 a receipt was never shipped..." does not contain this.
+            "A receipt is **never shipped, vendored or provisioned**.",
+            "**Shipping a receipt is not an acceptable remedy for a gate that "
+            "refuses.**",
+            # "exactly two" and the two, in one sentence: a third outcome
+            # cannot be added without rewriting this.
+            "The acceptable outcomes are exactly two: **acceptance at first "
+            "use, or no weights.**",
+        ):
+            with self.subTest(sentence=sentence[:48]):
+                self.assertIn(
+                    sentence, section,
+                    f"the receipts section no longer states {sentence!r}. "
+                    "This is the rule itself, not a phrase from it: restore "
+                    "the sentence rather than relaxing this check.",
+                )
+
+        # 3. What it must not say. The outcomes are exactly two, so the phrase
+        #    occurs once in the whole file, in the sentence pinned above.
+        self.assertEqual(
+            readme.count("acceptable outcomes"), 1,
+            "'acceptable outcomes' appears more than once; a second list of "
+            "outcomes is how a third one gets added without touching the "
+            "sentence this test pins",
+        )
+        lowered = readme.lower()
+        for forbidden in (
+            "may carry",
+            "provisioned by the image builder",
+            "on the user's behalf",
+            "until 0.2.2 a receipt was",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(
+                    forbidden, lowered,
+                    f"README.md contains {forbidden!r}, which reads as a "
+                    "shipped receipt being permitted. OD-BC permits none.",
+                )
+
         for required in (
             "never shipped, vendored or provisioned",
             "not an acceptable remedy for a gate that refuses",
@@ -105,6 +184,47 @@ class RepositoryIdentityTests(unittest.TestCase):
                     "rule where a reader meets it because nothing else can "
                     "enforce it; restore it rather than deleting this check.",
                 )
+        # LIC6-VERIFY F6. The same honesty is stated a second time in
+        # Acceptance's docstring, "where a caller meets it" -- and only the
+        # README copy was pinned, so mutant v18 inverted the code-side copy
+        # into "this authority's verified proof that a human read the licence
+        # and accepted it ... Treat the block as consent." with the suite
+        # green. A caller with an editor open reads the docstring, not the
+        # README, so it is pinned here too: the three "does not" sentences
+        # must be present, and the overclaiming language must be absent.
+        raw_agreement = (
+            ROOT / "src" / "kilix_license" / "agreement.py"
+        ).read_text(encoding="utf-8")
+        agreement = " ".join(raw_agreement.split())
+        for required in (
+            "does **not** prove that a human accepted anything",
+            "does **not** say which human",
+            "does **not** prove that the recorded time is the real time",
+            "Nothing signs it",
+        ):
+            with self.subTest(docstring=required):
+                self.assertIn(
+                    required, agreement,
+                    f"kilix_license/agreement.py no longer states {required!r}. "
+                    "OD-BC's honest statement of what a receipt is worth is "
+                    "pinned in the code as well as in the README, because a "
+                    "caller meets the docstring and not the README.",
+                )
+        lowered_agreement = agreement.lower()
+        for forbidden in (
+            "proof that a human",
+            "signature of",
+            "treat the block as consent",
+            "verified proof",
+        ):
+            with self.subTest(overclaim=forbidden):
+                self.assertNotIn(
+                    forbidden, lowered_agreement,
+                    f"kilix_license/agreement.py contains {forbidden!r}. A "
+                    "receipt is unsigned and proves none of that; no wording "
+                    "in this module may imply it does.",
+                )
+
         # OD-BC "record neither": no document may describe an identity field.
         for forbidden in ("captured_by_account", "captured_by_uid"):
             with self.subTest(forbidden=forbidden):
@@ -117,6 +237,45 @@ class RepositoryIdentityTests(unittest.TestCase):
                         f"{name} names {forbidden!r}; OD-BC records neither "
                         "identity field, so no document may imply one exists.",
                     )
+
+    def test_a_gate_runs_the_note_source_check(self) -> None:
+        # LIC6-VERIFY F4. tools/verify_note_sources.py catches m8b -- it exits
+        # 1 on the forged tree with both digests named -- and no gate ran it,
+        # because `check` was `sync test build`. The wiring is bound here, not
+        # only described, so a later edit that drops it fails.
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        check = [
+            line for line in makefile.splitlines() if line.startswith("check:")
+        ]
+        self.assertEqual(len(check), 1, check)
+        self.assertIn(
+            "notes-guarded", check[0],
+            "`make check` no longer reaches the advisory-note source check. "
+            "Without it the evidence packets are a second witness on paper "
+            "only (LIC6-VERIFY F4).",
+        )
+        for required in (
+            "notes:",
+            "notes-guarded:",
+            "tools/verify_note_sources.py --packets",
+            # and it is not silently optional: the skip says what was not done
+            "SKIPPED",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, makefile)
+        self.assertIn(
+            "notes notes-guarded",
+            makefile,
+            "both targets must be .PHONY, or a stray file named `notes` "
+            "silently disables the check",
+        )
+        # The tool itself is present, executable as a script, and takes the
+        # packets as an argument rather than committing a path.
+        tool = ROOT / "tools" / "verify_note_sources.py"
+        self.assertTrue(tool.is_file())
+        source = tool.read_text(encoding="utf-8")
+        self.assertIn("--packets", source)
+        self.assertNotIn("/home/", source)
 
     def test_publication_disposition_is_explicit(self) -> None:
         disposition_text = (ROOT / "PUBLICATION.md").read_text(encoding="utf-8")

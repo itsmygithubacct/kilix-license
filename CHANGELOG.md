@@ -4,6 +4,49 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- Authored advisory-note prose is **pinned, not screened**. A note's own
+  lines - its preamble and each block's three header lines - were checked
+  by a detector that looked for licence identifiers and the language of
+  permission, and a false sentence phrased outside that vocabulary walked
+  past it onto a first-use consent screen with the whole suite green:
+  "Meta later allowed everyone to reuse the encodec weights freely", on a
+  screen whose binding condition is CC BY-NC 4.0, printed beneath it. No
+  addition to the vocabulary closes that class. The authored text must now
+  equal, byte for byte, the lines declared in `ADVISORY_NOTE_AUTHORED`, so
+  a new or altered authored sentence is refused whatever its wording, and
+  the generator refuses a note whose authored prose is undeclared. The
+  declaration is the one place a future editor changes; the refusal states
+  the four steps, and `README.md` records them. The quoted blocks are
+  unchanged and still re-derived from their named source, so text appended
+  after the last block is still caught there.
+- With `$GPU_TERMINAL_HOME` unset the receipt store root is now
+  `$HOME/.local/gpu_terminal/license-receipts`, which is what `voicelib`,
+  `kilix/bootstrap.sh`, `kilix/build.sh` and `pleb/lib/common.sh` all
+  compose. It read the NSS passwd home before, which ignores `$HOME`: in a
+  sandbox or a service unit where the two differ, the real first-use flow
+  filed a receipt at one root while the real weights gate refused at
+  another, and told the user to accept a licence they had just accepted.
+  The suite's live-store guard still reads the passwd home, deliberately -
+  the suite redirects `$HOME`, so a `$HOME`-based guard would stop guarding
+  the real store while the suite runs - and it now refuses both spellings.
+- A receipt whose `acceptance.captured_at` or `acceptance.capture_mode` is
+  not a string is refused as a `ReceiptShapeError` naming the field,
+  instead of raising `TypeError` out of a regex; a consumer that catches
+  the refusal no longer sees a traceback from one malformed file in the
+  store. `captured_at` with a trailing newline is refused too.
+- The shipping rule is bound by its sentences and its location rather than
+  by eight substrings: reversing it in place, moving it to an appendix and
+  adding a third acceptable outcome each left every substring intact. The
+  honest statement of what a receipt proves is now pinned in
+  `Acceptance`'s docstring as well as in `README.md`, where a caller meets
+  it. The rule itself is enforceable only by being read, and it appears
+  nowhere outside this repository: enforcement where images are built is
+  owed to those repositories, not provided here.
+- `make check` reaches `tools/verify_note_sources.py`. It is the only check
+  that settles an advisory note's quoted source against the evidence
+  packets rather than against two pins inside this tree, and no gate ran
+  it. `make notes PACKETS=<dir>` runs it; `make check` runs it whenever
+  `PACKETS` is set and prints what was not checked when it is not.
 - There is one receipt store root and this authority names it:
   `receipt_store_root()` is `$GPU_TERMINAL_HOME/license-receipts`,
   overridden by `$KILIX_LICENSE_RECEIPTS`, and `ReceiptStore.shared()`

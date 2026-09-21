@@ -4,7 +4,14 @@ import tempfile
 import unittest
 
 from kilix_license.errors import LiveStoreForbidden
-from kilix_license.paths import live_store_root
+from kilix_license.paths import (
+    STACK_HOME_DIRS,
+    is_under_live_store,
+    live_store_root,
+    live_store_roots,
+    nss_home,
+    user_home,
+)
 
 from fake_store import FakeStore
 from live_store_guard import live_root
@@ -42,6 +49,30 @@ class HarnessTests(unittest.TestCase):
     def test_guard_root_is_nss_home_not_redirected_home(self) -> None:
         self.assertEqual(live_root(), live_store_root())
         self.assertEqual(live_root().parts[-2:], (".local", "gpu_terminal"))
+        # Asserted against pw_dir itself, not against live_store_root(), so a
+        # change that moves BOTH to $HOME fails here (LIC6-VERIFY F1, mutant
+        # v5). $HOME is redirected into a scratch directory by `make test`, so
+        # a $HOME-based guard stops guarding the real store while the suite
+        # runs -- the one moment it has to work.
+        self.assertEqual(live_root(), nss_home().joinpath(*STACK_HOME_DIRS))
+        home = user_home()
+        if str(home) != str(nss_home()):
+            self.assertFalse(str(live_root()).startswith(str(home) + os.sep))
+            self.assertNotEqual(live_root(), home.joinpath(*STACK_HOME_DIRS))
+
+    def test_the_guard_refuses_both_spellings_of_the_live_store(self) -> None:
+        # The receipt root now follows $HOME (F1). The guard must refuse that
+        # spelling too, so nothing the guard used to catch became writable.
+        roots = live_store_roots()
+        self.assertIn(live_store_root(), roots)
+        self.assertIn(user_home().joinpath(*STACK_HOME_DIRS), roots)
+        for root in roots:
+            with self.subTest(root=str(root)):
+                self.assertTrue(is_under_live_store(str(root)))
+                self.assertTrue(is_under_live_store(str(root / "license-receipts")))
+                with self.assertRaises(LiveStoreForbidden):
+                    FakeStore(root / "license-receipts")
+        self.assertFalse(is_under_live_store(str(self._scratch)))
 
     def test_planted_dir_fd_relative_create_is_refused(self) -> None:
         live = live_root()

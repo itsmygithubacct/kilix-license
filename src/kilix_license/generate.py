@@ -241,6 +241,83 @@ ADVISORY_TEXT_SOURCES = {
         ),
     ),
 }
+
+
+def _authored_bytes(lines: tuple[str, ...]) -> bytes:
+    """The assembled authored text: each line, in order, newline-terminated."""
+    return "".join(f"{line}\n" for line in lines).encode("utf-8")
+
+
+# LIC6-VERIFY F3, residual m11b. This is the pin, and it replaces detection.
+#
+# A note has two kinds of line. Quoted lines are re-derived from their named
+# source byte for byte, so they cannot be fabricated. Authored lines -- the
+# preamble and each block's three header lines -- are ours, and every guard
+# they had before this was a DETECTOR: states_a_licence() looks for a licence
+# identifier and the language of permission. A detector over a vocabulary can
+# only ever catch the sentences somebody thought of. m11b walked straight past
+# it with plain English -- "Meta later allowed everyone to reuse the encodec
+# weights freely." -- on a screen whose binding condition is CC BY-NC 4.0,
+# non-commercial, printed directly beneath it, with the whole suite green.
+# No addition to that vocabulary closes the class, because the class is
+# "sentences a reader believes", not "sentences containing a licence word".
+#
+# So the authored text is no longer screened. It is CONSTRAINED: exactly these
+# lines, byte for byte, in this order, and nothing else may appear. A new or
+# altered authored sentence fails whatever its wording, because the check is
+# equality with a declaration rather than a search for something suspicious.
+#
+# Keyed by the note's own sha256, so the note and its authored text cannot be
+# re-pointed independently. The digest over the assembled text is DERIVED
+# below, never typed, so the two cannot drift.
+#
+# **To change what this authority says on a consent screen**, edit the tuple
+# below in the same commit as the note; the refusal message states the four
+# steps. A sentence that is not in this declaration does not reach a user.
+ADVISORY_NOTE_AUTHORED = {
+    "8cfc463c41113f776eebc60642a0e4f9841aaff247d9659d8abc466743755260": (
+        # The preamble: what the note is, and what it promises the reader.
+        'EnCodec licence history. Every line below a "quoted from" header is copied',
+        "byte for byte from the source that header names; nothing here is retyped.",
+        "The source file is pinned by licence-evidence-encodec-errata-2026-09-17",
+        "(L-ENC-R2) sources/quotes.json, sha256 15d17ef65ae566134fe3fa238817211192019fb066717db675192a0a545a5dca.",
+        # Block 1's three header lines.
+        "quoted from licence-evidence-encodec-2026-09-15/sources/upstream-licence-history.txt",
+        "sha256 1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90, lines 14 and 18",
+        "(facebookresearch/encodec LICENSE and README at the commits named):",
+        # Block 2's three header lines, including LIC5-FIX-VERIFY F2's
+        # orienting clause about which repository "this repository" is.
+        "quoted from licence-evidence-encodec-2026-09-15/sources/upstream-licence-history.txt",
+        "sha256 1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90, lines 91 to 94",
+        '(section 9 of that file: facebookresearch/audiocraft, an adjacent Meta repository that states a licence for model weights separately from the licence for code; "this repository" in the lines below is audiocraft, not encodec):',
+    ),
+}
+# Derived from the declaration above, never typed: the two cannot disagree.
+# This is the figure to quote when re-pinning a note downstream.
+ADVISORY_NOTE_AUTHORED_SHA256 = {
+    digest: sha256_hex(_authored_bytes(tuple(lines)))
+    for digest, lines in ADVISORY_NOTE_AUTHORED.items()
+}
+# The one place an authored line is declared, named in every refusal so the
+# deliberate path is the obvious one.
+AUTHORED_DECLARATION = (
+    "ADVISORY_NOTE_AUTHORED in src/kilix_license/generate.py"
+)
+_AUTHORED_UPDATE = (
+    f"Authored note prose is pinned, not screened: every line of a note that "
+    f"nobody upstream wrote must appear byte for byte in "
+    f"{AUTHORED_DECLARATION}, keyed by the note's sha256. This is the only "
+    f"way to change what this authority says on a consent screen, and it is "
+    f"meant to be a visible, reviewable edit: (1) edit the note under "
+    f"src/kilix_license/data/texts/ and rename it to its new sha256; "
+    f"(2) copy its authored lines -- the preamble and each block's three "
+    f"header lines, in note order, blank lines omitted -- into "
+    f"{AUTHORED_DECLARATION} under the new digest; (3) point ADVISORY_TEXTS "
+    f"and ADVISORY_TEXT_SOURCES at the new digest; (4) run `make records`. "
+    f"Do not widen a detector instead: a sentence absent from that "
+    f"declaration never reaches a user, whatever its wording."
+)
+
 _QUOTED_FROM = "quoted from "
 _QUOTED_SHA = re.compile(r"^sha256 ([0-9a-f]{64}), lines? (.+)$")
 # LIC5-FIX-VERIFY F1, mutant M11. The guard above covers what a note *quotes*.
@@ -745,6 +822,91 @@ def authored_lines(
     return parse_advisory_note(data, label)[0]
 
 
+def authored_text(authored: tuple[tuple[int, str], ...]) -> bytes:
+    """The authored lines assembled into one text, each newline-terminated.
+
+    The thing that is pinned. Line numbers are dropped, so re-wrapping the
+    quoted blocks around unchanged prose is not a change to the authored text,
+    while any change to the prose itself is.
+    """
+    return _authored_bytes(tuple(line for _number, line in authored))
+
+
+def authored_digest(authored: tuple[tuple[int, str], ...]) -> str:
+    """sha256 of :func:`authored_text`. Never typed; always derived."""
+    return sha256_hex(authored_text(authored))
+
+
+def check_advisory_note_authored(
+    digest: str,
+    authored: tuple[tuple[int, str], ...],
+    table: Mapping[str, tuple[str, ...]] | None = None,
+) -> None:
+    """Refuse a note whose authored text is not the text declared for it.
+
+    LIC6-VERIFY F3 (residual m11b). The predecessor of this check screened
+    authored lines for licence vocabulary, which a false sentence phrased in
+    plain English walks straight past -- and did, on a consent screen, with
+    the suite green. This does not screen. It requires the authored text to be
+    exactly what ``ADVISORY_NOTE_AUTHORED`` declares, so a new or altered
+    authored sentence is refused **whatever it says**; there is no wording
+    that satisfies it except the declared wording.
+
+    The quoted blocks are untouched by this: they keep the byte-for-byte
+    re-derivation from their named source, so text appended after the last
+    block is still swallowed into that block's quoted bytes and still fails
+    there (LIC5 mutant M13).
+    """
+    if table is None:
+        table = ADVISORY_NOTE_AUTHORED
+    declared_lines = table.get(digest)
+    if declared_lines is None:
+        raise ValueError(
+            f"advisory note {digest} declares no authored text. "
+            + _AUTHORED_UPDATE
+        )
+    declared = tuple(declared_lines)
+    found = tuple(line for _number, line in authored)
+    if found == declared:
+        return
+    numbers = [number for number, _line in authored]
+    for position in range(max(len(found), len(declared))):
+        mine = found[position] if position < len(found) else None
+        theirs = declared[position] if position < len(declared) else None
+        if mine == theirs:
+            continue
+        if mine is None:
+            what = (
+                f"the note has no {_ordinal(position + 1)} authored line, and "
+                f"the declaration ends with {theirs!r}"
+            )
+        elif theirs is None:
+            what = (
+                f"note line {numbers[position]} is {mine!r}, which the "
+                "declaration does not have at all"
+            )
+        else:
+            what = (
+                f"at note line {numbers[position]} the note has {mine!r} "
+                f"and the declaration has {theirs!r}"
+            )
+        raise ValueError(
+            f"advisory note {digest} authored text is not the text declared "
+            f"for it ({len(found)} authored lines, declared {len(declared)}): "
+            f"{what}. " + _AUTHORED_UPDATE
+        )
+    raise ValueError(  # pragma: no cover - equality already excluded above
+        f"advisory note {digest} authored text differs from its declaration. "
+        + _AUTHORED_UPDATE
+    )
+
+
+def _ordinal(number: int) -> str:
+    if 10 <= number % 100 <= 20:
+        return f"{number}th"
+    return f"{number}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th') }"
+
+
 def parse_advisory_note(data: bytes, label: str = "advisory note") -> tuple[
     tuple[tuple[int, str], ...], tuple[tuple[QuotedSource, bytes], ...]
 ]:
@@ -846,6 +1008,12 @@ def check_advisory_note_sources(
             f"advisory note {digest} quotes {found}, "
             f"but ADVISORY_TEXT_SOURCES declares {tuple(declared)}"
         )
+    # What the note QUOTES is settled above. What the note SAYS ITSELF is
+    # settled by the pin, and then screened once more for a licence claim --
+    # the pin is what closes m11b, and the screen is kept so that a licence
+    # identifier is refused at the declaration too, rather than only being
+    # unequal to it (LIC5-FIX-VERIFY F1, mutant M11).
+    check_advisory_note_authored(digest, authored)
     check_advisory_note_prose(digest, authored)
 
 
@@ -921,6 +1089,15 @@ def check_advisory_texts(
     if undeclared:
         raise ValueError(
             f"advisory replacement texts declare no quoted sources: {undeclared}"
+        )
+    # LIC6-FIX (LIC6-VERIFY F3): and a note whose own authored prose is
+    # undeclared is unchecked prose on a consent screen, so it is refused
+    # here too rather than reaching a screen as a new, unpinned note.
+    unpinned = sorted(set(table.values()) - set(ADVISORY_NOTE_AUTHORED))
+    if unpinned:
+        raise ValueError(
+            f"advisory replacement texts declare no authored text: {unpinned}. "
+            + _AUTHORED_UPDATE
         )
 
 

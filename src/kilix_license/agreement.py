@@ -25,7 +25,11 @@ INTERACTIVE_TTY = "interactive-tty"
 NO_TTY = "no-tty"
 CAPTURE_MODES = (INTERACTIVE_TTY, NO_TTY)
 
-_CAPTURED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+# \Z, not $: `$` also matches before a final newline, so "...Z\n" parsed and
+# covered (LIC6-VERIFY F9). It carried no identity -- nothing fits after the
+# newline -- but captured_at was not strictly canonical, and this authority's
+# own writer never produces one.
+_CAPTURED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,25 @@ class Acceptance:
     capture_mode: str
 
     def __post_init__(self) -> None:
+        # LIC6-VERIFY F7. Without this, a receipt whose captured_at is a
+        # number, a bool or bytes raised TypeError out of the regex rather
+        # than ReceiptShapeError -- the first receipt field in this module to
+        # leave the typed-failure contract. It reached a consumer:
+        # kilix_content.first_use.needs_agreement() catches CoverageRefused
+        # only, so one malformed file in the store turned the first-use flow
+        # into a traceback instead of a refusal anyone could act on.
+        if not isinstance(self.captured_at, str):
+            raise ReceiptShapeError(
+                "acceptance.captured_at",
+                "captured_at must be a string, not "
+                f"{type(self.captured_at).__name__} ({self.captured_at!r})",
+            )
+        if not isinstance(self.capture_mode, str):
+            raise ReceiptShapeError(
+                "acceptance.capture_mode",
+                "capture_mode must be a string, not "
+                f"{type(self.capture_mode).__name__} ({self.capture_mode!r})",
+            )
         if not _CAPTURED_AT.match(self.captured_at or ""):
             raise ReceiptShapeError(
                 "acceptance.captured_at",

@@ -341,6 +341,52 @@ class AuthorityTests(unittest.TestCase):
             parse_receipt_bytes(path.read_bytes()).acceptance, receipt.acceptance
         )
 
+    def test_a_malformed_captured_at_is_refused_not_a_type_error(self) -> None:
+        # LIC6-VERIFY F7. Acceptance.__post_init__ handed captured_at straight
+        # to a regex, so a receipt whose value was a number, a bool or bytes
+        # raised TypeError out of parse_receipt rather than ReceiptShapeError
+        # -- the first receipt field in this module to leave the typed-failure
+        # contract. It reached a consumer: kilix_content.first_use
+        # .needs_agreement() catches CoverageRefused only, so one malformed
+        # file in the store turned the first-use flow into a traceback
+        # instead of a refusal a user or a log reader could act on.
+        from kilix_license.receipts import parse_receipt
+
+        receipt = self._pocket_receipt()
+        self.assertIsNotNone(receipt.acceptance)
+        good = receipt.acceptance.to_jsonable()
+        # Every non-string shape the fuzz found, plus a list and a dict.
+        for value in (1000, 3.5, True, b"x", [], {}, None):
+            with self.subTest(captured_at=repr(value)):
+                planted = dict(receipt.to_jsonable())
+                planted["context"] = dict(planted["context"])
+                planted["context"]["acceptance"] = dict(good, captured_at=value)
+                with self.assertRaises(ReceiptShapeError) as caught:
+                    parse_receipt(planted)
+                self.assertEqual(caught.exception.field, "acceptance.captured_at")
+        # capture_mode too, so the pair is typed the same way.
+        for value in (1000, 3.5, True, b"x", [], {}, None):
+            with self.subTest(capture_mode=repr(value)):
+                planted = dict(receipt.to_jsonable())
+                planted["context"] = dict(planted["context"])
+                planted["context"]["acceptance"] = dict(good, capture_mode=value)
+                with self.assertRaises(ReceiptShapeError) as caught:
+                    parse_receipt(planted)
+                self.assertEqual(caught.exception.field, "acceptance.capture_mode")
+        # LIC6-VERIFY F9: `$` matched before a final newline, so "...Z\n"
+        # parsed and covered. It carried nothing, but it was not canonical.
+        planted = dict(receipt.to_jsonable())
+        planted["context"] = dict(planted["context"])
+        planted["context"]["acceptance"] = dict(
+            good, captured_at=good["captured_at"] + "\n"
+        )
+        with self.assertRaises(ReceiptShapeError) as caught:
+            parse_receipt(planted)
+        self.assertEqual(caught.exception.field, "acceptance.captured_at")
+        # and the receipt this authority actually writes still parses.
+        self.assertEqual(parse_receipt(receipt.to_jsonable()).acceptance,
+                         receipt.acceptance)
+
     def test_receipt_from_agreement_requires_named_binding_ids(self) -> None:
         agreement = capture_agreement(
             self.fixtures.pocket, typed_agreement_line(self.fixtures.pocket)

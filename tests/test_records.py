@@ -24,15 +24,21 @@ from kilix_license.errors import (
     TextDigestMismatch,
 )
 from kilix_license.generate import (
+    ADVISORY_NOTE_AUTHORED,
+    ADVISORY_NOTE_AUTHORED_SHA256,
     ADVISORY_TEXT_SOURCES,
     ADVISORY_TEXTS,
+    AUTHORED_DECLARATION,
     BINDING_TEXT_IDS,
     CONVERTER_ID,
     LICENCE_TEXT_IDS,
     FORBIDDEN_PREFIXES,
     PDF_ENGINE_RECORD_IDS,
     REQUIRED_RECORD_IDS,
+    authored_digest,
     authored_lines,
+    authored_text,
+    check_advisory_note_authored,
     check_advisory_note_prose,
     check_advisory_note_sources,
     check_advisory_texts,
@@ -907,6 +913,176 @@ class AdvisoryNoteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             authored_lines(headless)
 
+    def test_the_authored_text_is_pinned_and_nothing_else_may_appear(self) -> None:
+        # LIC6-VERIFY F3, residual m11b. The line above screens authored prose
+        # for licence vocabulary. m11b is the proof that a detector over a
+        # vocabulary cannot close the class: "Meta later allowed everyone to
+        # reuse the encodec weights freely." contains no licence identifier and
+        # no word from that pattern, rendered on a screen whose binding
+        # condition is CC BY-NC 4.0 printed beneath it, with the suite green.
+        #
+        # So this does not detect. The authored text is PINNED: exactly the
+        # lines ADVISORY_NOTE_AUTHORED declares, byte for byte, in order.
+        # Any other authored sentence fails whatever its wording, because the
+        # test is equality with a declaration.
+        note = (self.texts_dir / self.note_digest).read_bytes()
+        authored = authored_lines(note)
+        declared = ADVISORY_NOTE_AUTHORED[self.note_digest]
+        self.assertEqual(tuple(line for _n, line in authored), tuple(declared))
+        check_advisory_note_authored(self.note_digest, authored)
+
+        # The digest is derived from the declaration, never typed, so the
+        # declaration and the digest cannot drift apart.
+        self.assertEqual(
+            authored_digest(authored), ADVISORY_NOTE_AUTHORED_SHA256[self.note_digest]
+        )
+        self.assertEqual(
+            hashlib.sha256(authored_text(authored)).hexdigest(),
+            ADVISORY_NOTE_AUTHORED_SHA256[self.note_digest],
+        )
+        # Every shipped note is pinned, not just this one.
+        self.assertEqual(
+            sorted(ADVISORY_TEXTS.values()), sorted(ADVISORY_NOTE_AUTHORED)
+        )
+
+        # m11b itself, in the preamble: refused, and the refusal names the one
+        # place a future editor changes.
+        outside_the_vocabulary = (
+            b"Meta later allowed everyone to reuse the encodec weights freely."
+        )
+        self.assertIsNone(
+            states_a_licence(outside_the_vocabulary.decode("utf-8")),
+            "m11b is only interesting while the old detector misses it",
+        )
+        planted = note.replace(
+            b"\n\nquoted from ",
+            b"\n" + outside_the_vocabulary + b"\n\nquoted from ",
+            1,
+        )
+        self.assertNotEqual(planted, note)
+        with self.assertRaises(ValueError) as caught:
+            check_advisory_note_authored(
+                self.note_digest, authored_lines(planted)
+            )
+        message = str(caught.exception)
+        self.assertIn("is not the text declared for it", message)
+        self.assertIn(AUTHORED_DECLARATION, message)
+        self.assertIn("make records", message)
+        # and reached the way a record is generated, not only by direct call
+        with self.assertRaises(ValueError):
+            check_advisory_note_sources(self.note_digest, planted)
+
+        # The same, in a block's attribution header rather than the preamble.
+        in_a_header = note.replace(
+            b" repository that states a licence",
+            b" repository whose weights anyone may now reuse that states a licence",
+            1,
+        )
+        self.assertNotEqual(in_a_header, note)
+        with self.assertRaises(ValueError):
+            check_advisory_note_sources(self.note_digest, in_a_header)
+
+        # Every shape, not just insertion: altering a word, dropping a line,
+        # and reordering two lines are each refused.
+        altered = note.replace(b"nothing here is retyped", b"nothing here is invented", 1)
+        dropped = note.replace(
+            b"The source file is pinned by licence-evidence-encodec-errata-2026-09-17\n",
+            b"",
+            1,
+        )
+        for name, variant in (("altered", altered), ("dropped", dropped)):
+            with self.subTest(shape=name):
+                self.assertNotEqual(variant, note)
+                with self.assertRaises(ValueError):
+                    check_advisory_note_authored(
+                        self.note_digest, authored_lines(variant)
+                    )
+        # Reordering, checked on the parsed lines so the note stays parseable.
+        swapped = (authored[1], authored[0]) + authored[2:]
+        with self.assertRaises(ValueError):
+            check_advisory_note_authored(self.note_digest, swapped)
+
+        # A note nobody declared authored text for is refused, rather than
+        # reaching a screen as unpinned prose.
+        with self.assertRaises(ValueError) as caught:
+            check_advisory_note_authored(self.note_digest, authored, {})
+        self.assertIn("declares no authored text", str(caught.exception))
+
+    def test_the_generator_refuses_a_note_whose_authored_text_is_unpinned(self) -> None:
+        # The pin, reached the way a record is generated: a seat that edits the
+        # note and renames it to its new sha256 -- which is exactly what m11b
+        # did, and what the content-addressed store forces -- gets a refusal
+        # naming the declaration, not a green suite.
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-license-lic6fix-authored-"))
+        dest = scratch / "data"
+        shutil.copytree(DATA, dest)
+        texts = dest / "texts"
+        note = (texts / self.note_digest).read_bytes()
+        planted = note.replace(
+            b"\n\nquoted from ",
+            b"\nMeta later allowed everyone to reuse the encodec weights freely."
+            b"\n\nquoted from ",
+            1,
+        )
+        digest = hashlib.sha256(planted).hexdigest()
+        (texts / digest).write_bytes(planted)
+        with mock.patch.dict(
+            "kilix_license.generate.ADVISORY_TEXTS", {self.ADVISORY_ID: digest}
+        ), mock.patch.dict(
+            "kilix_license.generate.ADVISORY_TEXT_SOURCES",
+            {digest: ADVISORY_TEXT_SOURCES[self.note_digest]},
+        ), mock.patch.dict(
+            "kilix_license.generate.ADVISORY_NOTE_AUTHORED",
+            {digest: ADVISORY_NOTE_AUTHORED[self.note_digest]},
+        ):
+            with self.assertRaises(ValueError) as caught:
+                generate_records(self.payload, pin=self.pin, texts_dir=texts)
+        self.assertIn("is not the text declared for it", str(caught.exception))
+
+        # And a note with NO authored declaration at all does not generate
+        # either: check_advisory_texts refuses it before a screen exists.
+        with mock.patch.dict(
+            "kilix_license.generate.ADVISORY_TEXTS", {self.ADVISORY_ID: digest}
+        ), mock.patch.dict(
+            "kilix_license.generate.ADVISORY_TEXT_SOURCES",
+            {digest: ADVISORY_TEXT_SOURCES[self.note_digest]},
+        ), mock.patch.dict(
+            "kilix_license.generate.ADVISORY_NOTE_AUTHORED", {}, clear=True
+        ):
+            with self.assertRaises(ValueError) as caught:
+                generate_records(self.payload, pin=self.pin, texts_dir=texts)
+        self.assertIn("declare no authored text", str(caught.exception))
+
+    def test_text_appended_after_the_last_quoted_block_is_still_caught(self) -> None:
+        # LIC5 mutant M13, made explicit. It was killed only implicitly: text
+        # appended after the last block is swallowed into that block's quoted
+        # lines and fails the byte comparison. Pinning the authored text must
+        # not change that -- such a line is not an authored line at all, so
+        # the pin never sees it, and the boundary has to keep holding on its
+        # own. Asserted here so a later change to parse_advisory_note that
+        # started treating trailing text as authored, or as neither, fails.
+        note = (self.texts_dir / self.note_digest).read_bytes()
+        appended = note.rstrip(b"\n") + (
+            b"\nMeta later allowed everyone to reuse the encodec weights freely.\n"
+        )
+        self.assertNotEqual(appended, note)
+        # It is NOT admitted as authored text: the authored lines are unchanged.
+        self.assertEqual(authored_lines(appended), authored_lines(note))
+        # It is swallowed into the last block's quoted bytes, and those no
+        # longer match the source the header names.
+        blocks = parse_quoted_blocks(appended)
+        last = blocks[-1]
+        self.assertIn(b"reuse the encodec weights freely", last[1])
+        pinned = (self.SOURCES / last[0].sha256).read_bytes()
+        lines = pinned.split(b"\n")
+        expected = b"".join(lines[n - 1] + b"\n" for n in last[0].lines)
+        self.assertNotEqual(last[1], expected)
+        # A blank line before it instead is refused at the parse.
+        with self.assertRaises(ValueError):
+            parse_quoted_blocks(
+                note.rstrip(b"\n") + b"\n\nMeta later allowed everyone freely.\n"
+            )
+
     def test_the_quoted_sources_digest_has_a_second_witness_in_the_packet(self) -> None:
         # LIC5-FIX-VERIFY F3, mutant M8. The source file is pinned under
         # tests/data/note-sources/<its own sha256>, so a seat that forges the
@@ -1003,6 +1179,13 @@ class AdvisoryNoteTests(unittest.TestCase):
         ), mock.patch.dict(
             "kilix_license.generate.ADVISORY_TEXT_SOURCES",
             {digest: ADVISORY_TEXT_SOURCES[self.note_digest]},
+        ), mock.patch.dict(
+            # LIC6-FIX: the authored-text pin is keyed by the note's digest,
+            # so a renamed note needs an entry or it is refused for being
+            # unpinned before this guard is reached. Declared here so the
+            # refusal this test is about is the one it asserts.
+            "kilix_license.generate.ADVISORY_NOTE_AUTHORED",
+            {digest: ADVISORY_NOTE_AUTHORED[self.note_digest]},
         ):
             with self.assertRaises(ValueError) as caught:
                 generate_records(self.payload, pin=self.pin, texts_dir=texts)

@@ -34,11 +34,16 @@ from kilix_license.errors import ReceiptStoreRootRefused
 from kilix_license.paths import (
     RECEIPT_STORE_ENV,
     RECEIPT_STORE_LEAF,
+    STACK_HOME_DIRS,
     STACK_HOME_ENV,
     check_receipt_store_root,
+    is_under_live_store,
     live_store_root,
+    live_store_roots,
+    nss_home,
     receipt_store_root,
     stack_home,
+    user_home,
 )
 from kilix_license.store import ReceiptStore
 
@@ -137,16 +142,108 @@ class ReceiptStoreRootTests(unittest.TestCase):
             self.assertEqual(receipt_store_root(), home / "license-receipts")
             self.assertEqual(receipt_store_root(), home / RECEIPT_STORE_LEAF)
 
-    def test_with_no_stack_home_the_root_follows_the_nss_home(self) -> None:
-        # No store is constructed here: this arm resolves to the invoking
-        # user's real store, which this suite never touches (tests/__init__).
+    def test_with_no_stack_home_the_root_follows_the_stacks_own_home(self) -> None:
+        # LIC6-VERIFY F1. With $GPU_TERMINAL_HOME unset the root must compose
+        # what every OTHER component composes: $HOME/.local/gpu_terminal plus
+        # the leaf. It used to compose the NSS passwd home's, which ignores
+        # $HOME, so in any environment where the two differ -- a sandbox, a
+        # service unit, `su` without `-l` -- the writer filed a receipt at one
+        # root and the reader refused at another. The literals are typed here
+        # deliberately: they are the stack's convention, not this module's
+        # preference, and moving either must fail in this repository.
+        #
+        # No store is constructed in this arm: it resolves under the invoking
+        # user's own home, which this suite never writes to (tests/__init__).
+        self.assertEqual(STACK_HOME_DIRS, (".local", "gpu_terminal"))
         environment = {k: v for k, v in os.environ.items()
                        if k not in (STACK_HOME_ENV, RECEIPT_STORE_ENV)}
         with mock.patch.dict(os.environ, environment, clear=True):
-            self.assertEqual(stack_home(), live_store_root())
+            expected = Path(os.path.expanduser("~")) / ".local" / "gpu_terminal"
+            self.assertEqual(stack_home(), expected)
+            self.assertEqual(stack_home(), user_home().joinpath(*STACK_HOME_DIRS))
             self.assertEqual(
-                receipt_store_root(), live_store_root() / RECEIPT_STORE_LEAF
+                receipt_store_root(), expected / RECEIPT_STORE_LEAF
             )
+
+    def test_the_fallback_is_what_every_other_component_composes(self) -> None:
+        # The claim LIC6-VERIFY F1 falsified, re-stated as a test rather than
+        # as prose: with $GPU_TERMINAL_HOME unset, this authority's root and
+        # voicelib.licensing.receipt_store_root() are the same string.
+        # voicelib is not importable here, so its two lines are reproduced --
+        # os.path.join(os.path.expanduser("~"), ".local", "gpu_terminal") and
+        # os.path.join(that, "license-receipts") -- against an $HOME that is
+        # NOT the passwd home, which is the only case that ever differed.
+        elsewhere = self.scratch / "sandbox-home"
+        elsewhere.mkdir()
+        environment = {k: v for k, v in os.environ.items()
+                       if k not in (STACK_HOME_ENV, RECEIPT_STORE_ENV)}
+        environment["HOME"] = str(elsewhere)
+        with mock.patch.dict(os.environ, environment, clear=True):
+            self.assertNotEqual(str(elsewhere), str(nss_home()))
+            voicelib_home = os.path.join(
+                os.path.expanduser("~"), ".local", "gpu_terminal"
+            )
+            voicelib_root = os.path.join(voicelib_home, "license-receipts")
+            self.assertEqual(str(stack_home()), voicelib_home)
+            self.assertEqual(str(receipt_store_root()), voicelib_root)
+            # and it is NOT the passwd home's, which is what it used to be
+            self.assertNotEqual(
+                str(receipt_store_root()),
+                str(nss_home() / ".local" / "gpu_terminal" / "license-receipts"),
+            )
+
+    def test_the_live_store_guard_still_reads_the_passwd_home(self) -> None:
+        # Mutant v5's lesson: nss_home() also backs the live-store guard, so
+        # the root fix had to SPLIT the two, not move both. The guard must
+        # keep reading the passwd home, because the suite redirects $HOME into
+        # a scratch directory -- a $HOME-based guard would stop guarding the
+        # real store exactly while the suite runs.
+        self.assertEqual(live_store_root(), nss_home().joinpath(*STACK_HOME_DIRS))
+        home = user_home()
+        if str(home) != str(nss_home()):
+            # This is the `make test` case: $HOME is redirected.
+            self.assertFalse(
+                str(live_store_root()).startswith(str(home) + os.sep),
+                f"the live-store guard followed $HOME ({home}) instead of the "
+                "passwd home; it would no longer guard the real store",
+            )
+        # Nothing the guard used to refuse became allowed: both spellings are
+        # refused, so broadening the receipt root narrowed no protection.
+        for root in live_store_roots():
+            with self.subTest(root=str(root)):
+                self.assertTrue(is_under_live_store(str(root)))
+                self.assertTrue(is_under_live_store(str(root / "license-receipts")))
+        self.assertIn(live_store_root(), live_store_roots())
+        self.assertIn(user_home().joinpath(*STACK_HOME_DIRS), live_store_roots())
+
+    def test_a_wrong_root_with_the_right_leaf_is_refused(self) -> None:
+        # LIC6-VERIFY F5, mutant v1: check_receipt_store_root compared only the
+        # basename and the suite never noticed, because every wrong root the
+        # suite built had a different leaf (`content-chosen-root`,
+        # `writer-chosen-root`, `deployment-chosen`). The wrong root that
+        # actually occurs is F1's shape -- a DIFFERENT stack home with the SAME
+        # leaf -- and it is a public-API call (KL.check_receipt_store_root) a
+        # consumer uses to validate its own configured path.
+        agreed_home = self.scratch / "agreed-home"
+        other_home = self.scratch / "other-home"
+        near_miss = other_home / RECEIPT_STORE_LEAF
+        with mock.patch.dict(
+            os.environ, {STACK_HOME_ENV: str(agreed_home)}, clear=False
+        ):
+            os.environ.pop(RECEIPT_STORE_ENV, None)
+            agreed = agreed_home / RECEIPT_STORE_LEAF
+            self.assertEqual(receipt_store_root(), agreed)
+            self.assertEqual(near_miss.name, agreed.name)
+            self.assertNotEqual(str(near_miss), str(agreed))
+            for call in (check_receipt_store_root, ReceiptStore.shared):
+                with self.subTest(call=call.__name__):
+                    with self.assertRaises(ReceiptStoreRootRefused) as caught:
+                        call(near_miss)
+                    message = str(caught.exception)
+                    # both FULL paths, not just the leaf they share
+                    self.assertIn(str(near_miss), message)
+                    self.assertIn(str(agreed), message)
+            self.assertFalse(near_miss.exists())
 
     def test_the_override_moves_the_root_for_every_caller_at_once(self) -> None:
         elsewhere = self.scratch / "deployment-chosen"

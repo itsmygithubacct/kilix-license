@@ -1,4 +1,4 @@
-.PHONY: sync test build check hygiene records
+.PHONY: sync test build check hygiene records notes notes-guarded
 
 UV ?= uv
 PYTHON_VERSION ?= 3.12.8
@@ -72,7 +72,47 @@ records:
 	$(UV) run --frozen --no-sync --python $(PYTHON_VERSION) \
 		python tools/generate_records.py --check
 
-check: sync test build
+# LIC6-VERIFY F4 (mutant m8b). An advisory note's quoted source is pinned
+# twice inside this tree -- the source file and the evidence packet's own
+# record of it -- so a seat willing to make seven coordinated edits, two of
+# them renames, can forge both and ship green. Only the packets settle it,
+# and `tools/verify_note_sources.py` does check them: it exits 1 on the
+# forged tree, naming both digests. Nothing ran it, because `check` was
+# `sync test build`, so the second witness was documentation.
+#
+# It needs the packets, which are not in this repository and are not in a
+# fresh clone, so it takes them as an argument:
+#
+#     make notes PACKETS=<directory holding the licence-evidence-* packets>
+#
+# A release gate runs `make notes PACKETS=...` and must run it before an
+# advisory note's digest is re-pinned anywhere downstream. `make check` runs
+# it whenever PACKETS is set and says loudly when it is not, so the gate
+# reports an unchecked witness rather than silently omitting one.
+PACKETS ?=
+
+notes:
+	@set -eu; \
+	if [ -z "$(PACKETS)" ]; then \
+	  printf 'notes: PACKETS is not set.\n'; \
+	  printf 'notes: run `make notes PACKETS=<dir holding the licence-evidence-* packets>`\n'; \
+	  exit 1; \
+	fi; \
+	$(UV) run --frozen --no-sync --python $(PYTHON_VERSION) \
+		python tools/verify_note_sources.py --packets "$(PACKETS)"
+
+notes-guarded:
+	@set -eu; \
+	if [ -z "$(PACKETS)" ]; then \
+	  printf 'notes: SKIPPED -- PACKETS is not set, so the advisory notes'"'"' second\n'; \
+	  printf 'notes: witness (the evidence packets) was NOT checked. A release gate\n'; \
+	  printf 'notes: must run `make notes PACKETS=<dir>` before an advisory note\n'; \
+	  printf 'notes: digest is re-pinned. See tools/verify_note_sources.py.\n'; \
+	else \
+	  $(MAKE) notes PACKETS="$(PACKETS)"; \
+	fi
+
+check: sync test build notes-guarded
 
 hygiene:
 	hygiene-scan --recurse

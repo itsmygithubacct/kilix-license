@@ -92,6 +92,21 @@ caller that hands in a path gets it checked, and anything but the agreed
 root raises `ReceiptStoreRootRefused` naming both. `ReceiptStore(root)` is
 unchanged and still opens any directory, for fixtures and inspection.
 
+With `$GPU_TERMINAL_HOME` unset the root is **`$HOME/.local/gpu_terminal/license-receipts`**.
+That is the composition the rest of the stack already performs -
+`voicelib.paths.gpu_terminal_home()` is `os.path.expanduser("~")`, and
+`kilix/bootstrap.sh`, `kilix/build.sh` and `pleb/lib/common.sh` all read
+`GPU_TERMINAL_HOME="${GPU_TERMINAL_HOME:-$HOME/.local/gpu_terminal}"` - so
+the writer and the reader compose the same path with the variable set and
+with it unset. It read the NSS passwd home (`pw_dir`) before, which ignores
+`$HOME`; wherever the two differ - a sandbox, a service unit, `su` without
+`-l` - consent was filed at one root while the gate refused at another,
+which is exactly the symptom below. The suite's own live-store guard still
+reads `pw_dir`, deliberately and for a different reason: the suite
+redirects `$HOME` into a scratch directory, so a `$HOME`-based guard would
+stop guarding the real store at the one moment it has to work. Both
+spellings are refused by that guard.
+
 This exists because the two sides each used to choose: an acceptance filed
 by one component was invisible to another, and the symptom was a gate
 refusing a licence the user had just accepted. A consumer that composes its
@@ -184,8 +199,51 @@ uv sync --frozen --python 3.12.8
 make check
 ```
 
-`make check` syncs the frozen environment, runs the test suite, and
-builds installable artifacts. Inside a network sandbox run it as
-`make check OFFLINE=1`: `uv build` otherwise resolves the PEP 517 build
-backend over the network, which uv.lock does not pin, and the gate fails
-with a name-resolution error rather than a defect.
+`make check` syncs the frozen environment, runs the test suite, builds
+installable artifacts, and reaches the advisory-note source check. Inside a
+network sandbox run it as `make check OFFLINE=1`: `uv build` otherwise
+resolves the PEP 517 build backend over the network, which uv.lock does not
+pin, and the gate fails with a name-resolution error rather than a defect.
+
+### Checking an advisory note against the evidence packets
+
+An advisory note's quoted source is pinned twice inside this tree - the
+source file under `tests/data/note-sources/`, and the evidence packet's own
+record of it beside it - so both can be forged together by one seat willing
+to make the edits agree. Only the packets themselves settle it, and they
+are not in this repository:
+
+```sh
+make notes PACKETS=<directory holding the licence-evidence-* packets>
+```
+
+**A release gate runs that, and it must be run before an advisory note's
+digest is re-pinned anywhere downstream.** `make check` reaches it through
+`notes-guarded`, which runs it whenever `PACKETS` is set and prints a
+`notes: SKIPPED` block naming what was not checked when it is not - so a
+gate that omits the second witness says so rather than passing quietly.
+
+### Changing what this authority says on a consent screen
+
+An advisory note has two kinds of line. Lines under a `quoted from` header
+are re-derived from their named source byte for byte. Every other line -
+the preamble, and each block's three header lines - is **authored**, and is
+**pinned, not screened**: it must appear byte for byte in
+`ADVISORY_NOTE_AUTHORED` in `src/kilix_license/generate.py`, keyed by the
+note's sha256. Screening authored prose for licence vocabulary could not
+work, because a false sentence can be written in plain English; the
+constraint is equality with a declaration, so a new or altered authored
+sentence is refused whatever it says.
+
+To change it deliberately, in one place:
+
+1. edit the note under `src/kilix_license/data/texts/` and rename it to its
+   new sha256;
+2. copy its authored lines - in note order, blank lines omitted - into
+   `ADVISORY_NOTE_AUTHORED` under the new digest;
+3. point `ADVISORY_TEXTS` and `ADVISORY_TEXT_SOURCES` at the new digest;
+4. run `make records`.
+
+The generator's refusal states those four steps. Widening a detector is not
+an alternative: a sentence absent from that declaration never reaches a
+user.

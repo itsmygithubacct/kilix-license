@@ -1,11 +1,24 @@
 """Where receipts live, and the live store this suite must never touch.
 
-Two separate jobs:
+Two separate jobs, and they must not share a definition of "home"
+(LIC6-VERIFY F1):
 
 * ``receipt_store_root()`` is the **one** answer to "where does an acceptance
-  receipt go?", for every producer and every consumer in the stack (OD-AJ);
+  receipt go?", for every producer and every consumer in the stack (OD-AJ).
+  Its fallback composes **``$HOME``** via :func:`user_home`, because that is
+  what every other component in the stack composes -- ``voicelib.paths``'
+  ``gpu_terminal_home()`` (``os.path.expanduser("~")``), ``kilix/bootstrap.sh``,
+  ``kilix/build.sh`` and ``pleb/lib/common.sh`` (``$HOME/.local/gpu_terminal``).
+  A root that followed the NSS passwd home instead disagreed with all four
+  wherever ``$HOME`` and ``pw_dir`` differ, and the symptom was V-ACC-VERIFY
+  F7's: a receipt filed at one root and a gate refusing at another.
 * ``live_store_root()`` / ``refuse_live_store()`` are the test-harness guard
   that keeps this repository's own suite out of the invoking user's store.
+  That guard must **not** follow ``$HOME``: the suite redirects ``$HOME`` into
+  a scratch directory, so a ``$HOME``-based guard would stop guarding the real
+  store exactly when it is running. It reads the NSS passwd home, which the
+  suite cannot redirect. ``is_under_live_store()`` refuses **both** spellings,
+  so broadening the receipt root narrowed nothing the guard used to catch.
 """
 
 from __future__ import annotations
@@ -27,14 +40,53 @@ STACK_HOME_ENV = "GPU_TERMINAL_HOME"
 RECEIPT_STORE_ENV = "KILIX_LICENSE_RECEIPTS"
 # The directory name under the stack home. Consumers never spell it.
 RECEIPT_STORE_LEAF = "license-receipts"
+# The stack home's path under a user's home, as bootstrap.sh, build.sh,
+# common.sh and voicelib all spell it: $HOME/.local/gpu_terminal.
+STACK_HOME_DIRS = (".local", "gpu_terminal")
 
 
 def nss_home() -> Path:
+    """The NSS passwd home: ``pw_dir``, which ``$HOME`` cannot redirect.
+
+    Only the live-store guard reads this. No receipt path reaches it.
+    """
     return Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 
+def user_home() -> Path:
+    """``$HOME``, exactly as the rest of the stack reads it.
+
+    ``os.path.expanduser("~")`` is byte-for-byte what
+    ``voicelib.paths.gpu_terminal_home()`` calls, and falls back to ``pw_dir``
+    itself when ``$HOME`` is unset, so the two agree in every environment
+    where the stack's own convention agrees with itself.
+    """
+    return Path(os.path.expanduser("~"))
+
+
 def live_store_root() -> Path:
-    return nss_home() / ".local" / "gpu_terminal"
+    """The live store the suite must never touch: the **NSS** home's.
+
+    Deliberately not ``$HOME``-based; see the module docstring. This is the
+    guard's canonical root and the one ``live_store_guard.live_root()``
+    reports. ``is_under_live_store()`` refuses the ``$HOME`` spelling too.
+    """
+    return nss_home().joinpath(*STACK_HOME_DIRS)
+
+
+def live_store_roots() -> tuple[Path, ...]:
+    """Every spelling of the live store, NSS first, without duplicates.
+
+    Both are refused, so making the receipt root follow ``$HOME`` did not
+    open a path the guard used to close: where the two homes agree this is one
+    root, and where they differ it is two.
+    """
+    roots = [live_store_root(), user_home().joinpath(*STACK_HOME_DIRS)]
+    seen: list[Path] = []
+    for root in roots:
+        if root not in seen:
+            seen.append(root)
+    return tuple(seen)
 
 
 def _absolute(value: str, label: str) -> Path:
@@ -49,14 +101,20 @@ def _absolute(value: str, label: str) -> Path:
 def stack_home() -> Path:
     """The stack's shared writable root: ``$GPU_TERMINAL_HOME``.
 
-    Falls back to the NSS home's ``.local/gpu_terminal``, which is what
-    kilix-voice's ``voicelib.paths.gpu_terminal_home()`` already does, so the
-    default agrees with the consumer that has shipped one longest.
+    Falls back to ``$HOME/.local/gpu_terminal`` (LIC6-VERIFY F1). That is the
+    composition every other component in the stack already performs --
+    ``voicelib.paths.gpu_terminal_home()`` is ``os.path.expanduser("~")``,
+    and ``kilix/bootstrap.sh``, ``kilix/build.sh`` and ``pleb/lib/common.sh``
+    all read ``GPU_TERMINAL_HOME="${GPU_TERMINAL_HOME:-$HOME/.local/gpu_terminal}"``
+    -- so this authority and its consumers now compose the same path with the
+    variable set and with it unset. It read the NSS passwd home before, which
+    ignores ``$HOME``; in a sandbox or a service unit where the two differ,
+    consent was filed at one root and the gate refused at another.
     """
     value = os.environ.get(STACK_HOME_ENV)
     if value:
         return _absolute(value, STACK_HOME_ENV)
-    return live_store_root()
+    return user_home().joinpath(*STACK_HOME_DIRS)
 
 
 def receipt_store_root() -> Path:
@@ -108,6 +166,12 @@ def check_receipt_store_root(path: str | os.PathLike[str] | bytes) -> Path:
 
 
 def is_under_live_store(path: str | os.PathLike[str] | bytes) -> bool:
+    """True for a path under any spelling of the live store.
+
+    Every root in :func:`live_store_roots` is refused, not only the NSS one,
+    so making the receipt root follow ``$HOME`` did not create a real store
+    the suite may write to.
+    """
     text = os.fsdecode(path)
     if not text:
         return False
@@ -116,8 +180,11 @@ def is_under_live_store(path: str | os.PathLike[str] | bytes) -> bool:
         candidate = os.path.realpath(expanded)
     except OSError:
         candidate = os.path.normpath(expanded)
-    live = os.path.realpath(os.path.abspath(str(live_store_root())))
-    return candidate == live or candidate.startswith(live + os.sep)
+    for root in live_store_roots():
+        live = os.path.realpath(os.path.abspath(str(root)))
+        if candidate == live or candidate.startswith(live + os.sep):
+            return True
+    return False
 
 
 def refuse_live_store(path: str | os.PathLike[str] | bytes) -> None:
