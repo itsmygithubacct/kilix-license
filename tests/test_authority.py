@@ -19,6 +19,7 @@ from kilix_license.errors import (
     AtomicWriteCrashed,
     CoverageRefused,
     ParaphraseRefused,
+    ReceiptShapeError,
 )
 from kilix_license.paraphrase import POCKET_TERMS_SUMMARY, POCKET_TERMS_SUMMARY_BYTES
 from kilix_license.receipts import receipt_from_agreement
@@ -142,9 +143,10 @@ class AuthorityTests(unittest.TestCase):
                 "statement_digests",
             },
         )
+        # OD-BC: two fields, and no identity field. The literal set is
+        # asserted so one reappearing fails here rather than shipping.
         self.assertEqual(
-            set(payload["context"]["acceptance"]),
-            {"capture_mode", "captured_at", "captured_by_account", "captured_by_uid"},
+            set(payload["context"]["acceptance"]), {"capture_mode", "captured_at"}
         )
         self.assertEqual(payload["decision"], "accept")
         self.assertEqual(payload["licensor"], "Kyutai")
@@ -316,7 +318,21 @@ class AuthorityTests(unittest.TestCase):
             catalogue_digest=FIXTURE_CATALOGUE,
         )
         self.assertTrue(receipt.acceptance.was_captured_at_a_terminal)
-        self.assertEqual(receipt.acceptance.captured_by_uid, os.getuid())
+        # OD-BC "record neither": no identity survives into the receipt, and
+        # a receipt that carries one is refused rather than ignored.
+        self.assertEqual(
+            set(receipt.acceptance.to_jsonable()), {"capture_mode", "captured_at"}
+        )
+        planted = dict(receipt.to_jsonable())
+        planted["context"] = dict(planted["context"])
+        planted["context"]["acceptance"] = dict(
+            receipt.acceptance.to_jsonable(), captured_by_uid=os.getuid()
+        )
+        from kilix_license.receipts import parse_receipt
+
+        with self.assertRaises(ReceiptShapeError) as identity:
+            parse_receipt(planted)
+        self.assertIn("captured_by_uid", str(identity.exception))
         # and it survives a write/read round trip through the store.
         path = self.store.write(receipt)
         from kilix_license.receipts import parse_receipt_bytes

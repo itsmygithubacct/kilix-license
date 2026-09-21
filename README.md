@@ -105,22 +105,63 @@ or LIC4-FIX, are still read and still cover; their identities are resolved
 through the record their licence id names (pass `records=`).
 
 From LIC6 a receipt also records an `acceptance` block, again as context
-that is not bound: `captured_at` (the capturing machine's own UTC clock),
-`captured_by_account` / `captured_by_uid` (the POSIX account that process
-ran as), and `capture_mode` (`interactive-tty` when that process had a
-terminal on standard input and standard output, `no-tty` otherwise). Read
-those names literally. **A receipt does not identify a person, is not
-signed, and its timestamp is attested by nothing.** What the block adds is
-that a receipt now says when, as whom and at what kind of console it was
-minted, so a receipt produced by a build or an image is distinguishable
-from one minted at a console - by inspection, and by
-`require(..., captured_at_a_terminal=True)`, which is off by default and
-whose use anywhere in the stack is an owner decision. Receipts written
-before LIC6 carry no block, read exactly as before, and cover exactly as
-before; they are refused only by a caller that has opted in. Receipts
-written from LIC6 on are **refused by pre-LIC6 readers**, which reject an
-unknown context key - a fail-closed break, so every consumer pinning this
-authority must re-pin before anything writes a LIC6 receipt.
+that is not bound. OD-BC settled its shape: exactly two fields, and no
+identity. `captured_at` is the capturing machine's own UTC clock at
+capture; `capture_mode` is `interactive-tty` when that process had a
+terminal on both standard input and standard output, `no-tty` otherwise.
+**No account name and no uid is recorded**, so nothing in a receipt
+distinguishes two users of one machine - the accepted outcome of OD-BC,
+not an oversight. A receipt carrying an identity field is refused, not
+ignored.
+
+### What a receipt proves, and what it does not
+
+OD-BC: record, do not bind, in 0.2.2. A receipt is an unsigned JSON file in
+the user's own store. It records that this authority captured an agreement
+against a particular licence record and manifest, at a stated moment, with
+or without a terminal.
+
+**It does not prove that a human accepted anything. It does not say which
+human. It does not prove that the recorded time is the real time.** Nothing
+signs it, so a producer that wants to fabricate one can. Read the block as
+the place to look when asking where a receipt came from, never as consent.
+
+What it does buy: a receipt minted by a build step, an image build or an
+unattended provisioning script records `no-tty`, because there is no
+terminal there, and that is mechanically distinguishable from one minted at
+a console - by inspection, and by
+`require(..., captured_at_a_terminal=True)`. OD-BC keeps that lever
+**available and off**; the default is unchanged and every earlier receipt
+still covers.
+
+### A receipt is never shipped
+
+A receipt is **never shipped, vendored or provisioned**. The only producer
+is the first-use flow, on the user's own machine, after that user has been
+shown the licence and has accepted it (OD-S, OD-BB).
+
+**Shipping a receipt is not an acceptable remedy for a gate that refuses.**
+An image that carries one turns every install into consent nobody gave,
+while the audit surface reads "gated" - which is the bypass OS-V-VERIFY F2
+reported, wearing a compliant hat. The gate cannot tell the two apart, and
+no flag in this repository can enforce this rule; it is a rule about what
+is built.
+
+The acceptable outcomes are exactly two: **acceptance at first use, or no
+weights.**
+
+If a build needs to attest something about licences, that attestation is a
+**distinct schema** and never a `kilix.license.receipt/v1` (OD-BC, settling
+OQ-C4).
+
+### Compatibility
+
+Receipts written before LIC6 carry no `acceptance` block, read exactly as
+before, and cover exactly as before; they are refused only by a caller that
+has opted into `captured_at_a_terminal=True`. Receipts written from LIC6 on
+are **refused by pre-LIC6 readers**, which reject an unknown context key -
+a fail-closed break, so every consumer pinning this authority must re-pin
+before anything writes a LIC6 receipt.
 
 This `0.1.0` LIC2 state generates licence records from the checked
 determinations JSON (never retyped). The repository licence file is MIT

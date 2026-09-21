@@ -13,14 +13,24 @@ All notable changes to `kilix-license` are recorded here.
   A writer process and a reader process, each naming no path, are checked
   against each other in the suite, with the diverging arm as a control.
 - A receipt records an `acceptance` block as context that is not bound
-  (OD-AQ): `captured_at`, `captured_by_account`, `captured_by_uid` and
-  `capture_mode` (`interactive-tty` or `no-tty`), all observed by this
-  authority when the agreement is captured. It identifies no person, is
-  not signed and attests no clock. `require(..., captured_at_a_terminal=
-  True)` lets a caller demand the weakest form of it; the default is
-  unchanged and every earlier receipt still covers exactly as before.
-  Receipts written from here on are refused by readers older than this
-  change, which reject an unknown context key: re-pin consumers first.
+  (OD-AQ, shaped by OD-BC): exactly `captured_at` and `capture_mode`
+  (`interactive-tty` or `no-tty`), both observed by this authority when the
+  agreement is captured. **No account name and no uid is recorded**, so
+  nothing in a receipt distinguishes two users of one machine; a receipt
+  carrying an identity field is refused, not ignored. A receipt does not
+  prove that a human accepted, which human, or that its time is real - it
+  is unsigned. Minting without a recorded capture is refused, so the block
+  cannot be skipped. `require(..., captured_at_a_terminal=True)` lets a
+  caller demand the weakest form of it; OD-BC keeps it available and off,
+  the default is unchanged, and every earlier receipt still covers exactly
+  as before. Receipts written from here on are refused by readers older
+  than this change, which reject an unknown context key: re-pin consumers
+  first.
+- The rule OD-BC pairs with that, in `README.md` where a reader meets it: a
+  receipt is never shipped, vendored or provisioned; shipping one is not an
+  acceptable remedy for a refusing gate; the acceptable outcomes are
+  acceptance at first use, or no weights. A build-time attestation is a
+  distinct schema, never a `kilix.license.receipt/v1` (settling OQ-C4).
 - No line an advisory note wrote itself may state a licence. The note's
   preamble and each block's attribution header were checked by nothing, so
   a fabricated "relicensed to Apache-2.0; commercial use is permitted"

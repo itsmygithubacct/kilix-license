@@ -76,11 +76,17 @@ def require(
     a terminal (V-ACC-VERIFY F6's ``acceptance.capture_mode``). That refuses a
     receipt written with no console -- a build step, an image, a provisioning
     script -- and refuses every receipt written before LIC6, which record no
-    capture at all. It is not proof a person accepted anything (see
-    :class:`kilix_license.agreement.Acceptance`); it is the weakest mechanical
-    check that distinguishes a receipt minted at a console from one that was
-    shipped, and turning it on anywhere in the stack is an owner decision, not
-    a default this authority may impose.
+    capture at all. It is not proof a person accepted anything, and it says
+    nothing about which person: see
+    :class:`kilix_license.agreement.Acceptance` for exactly what a receipt
+    proves and does not. It is the weakest mechanical check that distinguishes
+    a receipt minted at a console from one that was shipped.
+
+    OD-BC keeps this lever **available and off**, and pairs it with a rule
+    that no flag can enforce: a receipt is never shipped, vendored or
+    provisioned, and shipping one is not an acceptable remedy for a refusing
+    gate. The acceptable outcomes are acceptance at first use, or no weights.
+    See ``README.md``.
     """
     record = records.by_digest(asset.record_digest)
     receipt = store.lookup(asset.record_digest, asset.manifest_digest)

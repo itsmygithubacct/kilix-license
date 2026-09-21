@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 import datetime as _datetime
-import os
-import pwd
 import re
 import sys
 from typing import Any
@@ -14,48 +12,59 @@ from typing import Any
 from kilix_license.errors import AgreementRequired, ReceiptShapeError
 from kilix_license.records import LicenseRecord
 
-# V-ACC-VERIFY F6. A receipt named no person, no moment and no circumstance, so
-# one well-formed receipt satisfied every gate, on every machine, for every
-# user, for ever -- and a receipt placed in an image would have read exactly
-# like consent a user gave. What follows does not fix that: it records, beside
-# the acceptance, the three facts this authority can observe for itself at the
-# moment the agreement is captured. Read what each field is called literally.
-# None of them is an identity claim, and none of them is attested by anything.
+# V-ACC-VERIFY F6, settled by OD-BC. A receipt named no person, no moment and
+# no circumstance, so one well-formed receipt satisfied every gate, on every
+# machine, for every user, for ever -- and a receipt placed in an image would
+# have read exactly like consent a user gave. What follows does not fix that.
+# It records the two facts this authority can observe for itself at the moment
+# the agreement is captured, and nothing else: OD-BC answered "record neither"
+# on the identity fields, so no account name and no uid is written.
+# Read what each field is called literally. Neither is an identity claim, and
+# neither is attested by anything.
 INTERACTIVE_TTY = "interactive-tty"
 NO_TTY = "no-tty"
 CAPTURE_MODES = (INTERACTIVE_TTY, NO_TTY)
 
 _CAPTURED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
-_ACCOUNT = re.compile(r"^[^\x00-\x1f\x7f]{1,256}$")
 
 
 @dataclass(frozen=True)
 class Acceptance:
     """What the authority observed about the process that captured agreement.
 
-    Deliberately narrow names. In particular:
+    Two fields, and only two. OD-BC answered "record neither" on identity, so
+    a receipt carries no account name and no uid: **nothing in a receipt
+    distinguishes two users of one machine**, and that is the accepted
+    outcome, not an oversight.
 
     * ``captured_at`` is the capturing machine's own UTC clock at capture. It
       is not attested, not signed and not compared with anything; a machine
       with a wrong or adjusted clock writes a wrong value and nothing notices.
-    * ``captured_by_account`` / ``captured_by_uid`` name the POSIX account the
-      capturing **process** ran as. That is not "the person who accepted": an
-      account is shared, delegated, automated and reused, and this authority
-      has no way to learn who was at the keyboard.
     * ``capture_mode`` is ``interactive-tty`` when that process had a terminal
       on both its standard input and its standard output at capture time, and
       ``no-tty`` otherwise. A terminal is evidence that something could have
       typed; it is not evidence that a person did.
 
+    **What a receipt proves, and what it does not** (OD-BC: record, do not
+    bind, in 0.2.2). A receipt is an unsigned JSON file on the user's own
+    disk. It records that an agreement was captured by this authority, against
+    a particular licence record and manifest, at a stated moment, with or
+    without a terminal. It does **not** prove that a human accepted anything;
+    it does **not** say which human, on a shared or automated account; and it
+    does **not** prove that the recorded time is the real time. Nothing signs
+    it, so a producer that wants to fabricate one can. Treat the block as the
+    place to look when asking where a receipt came from, never as consent.
+
     Nothing here is bound (OD-AI): ``covers()`` never reads it, so recording it
-    changes no receipt's coverage and voids no acceptance. It is audit context
-    -- the thing a reviewer reads when asking "where did this receipt come
-    from?" -- and, for a caller that opts in, a check a consumer can demand.
+    changes no receipt's coverage and voids no acceptance. It is audit context,
+    and, for a caller that opts in, a check a consumer can demand.
+
+    See the shipping rule in ``README.md``: a receipt is never shipped,
+    vendored or provisioned, and shipping one is not a remedy for a refusing
+    gate.
     """
 
     captured_at: str
-    captured_by_account: str
-    captured_by_uid: int
     capture_mode: str
 
     def __post_init__(self) -> None:
@@ -64,23 +73,6 @@ class Acceptance:
                 "acceptance.captured_at",
                 "captured_at must be RFC 3339 UTC seconds, e.g. "
                 f"2026-09-21T20:41:00Z, not {self.captured_at!r}",
-            )
-        if not isinstance(self.captured_by_account, str) or not _ACCOUNT.match(
-            self.captured_by_account
-        ):
-            raise ReceiptShapeError(
-                "acceptance.captured_by_account",
-                "captured_by_account must be one printable line",
-            )
-        if isinstance(self.captured_by_uid, bool) or not isinstance(
-            self.captured_by_uid, int
-        ):
-            raise ReceiptShapeError(
-                "acceptance.captured_by_uid", "captured_by_uid must be an integer"
-            )
-        if self.captured_by_uid < 0:
-            raise ReceiptShapeError(
-                "acceptance.captured_by_uid", "captured_by_uid must not be negative"
             )
         if self.capture_mode not in CAPTURE_MODES:
             raise ReceiptShapeError(
@@ -98,19 +90,19 @@ class Acceptance:
         return {
             "capture_mode": self.capture_mode,
             "captured_at": self.captured_at,
-            "captured_by_account": self.captured_by_account,
-            "captured_by_uid": self.captured_by_uid,
         }
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any], label: str) -> Acceptance:
         if not isinstance(raw, Mapping):
             raise ReceiptShapeError(label, f"{label} must be an object")
-        expected = {"capture_mode", "captured_at", "captured_by_account", "captured_by_uid"}
+        expected = {"capture_mode", "captured_at"}
         unknown = sorted(set(raw) - expected)
         if unknown:
             raise ReceiptShapeError(
-                f"{label}.{unknown[0]}", f"{label} has unknown field(s): {unknown}"
+                f"{label}.{unknown[0]}",
+                f"{label} has unknown field(s): {unknown}. OD-BC records only "
+                f"{sorted(expected)}; an identity field is refused, not ignored.",
             )
         missing = sorted(expected - set(raw))
         if missing:
@@ -119,8 +111,6 @@ class Acceptance:
             )
         return cls(
             captured_at=raw["captured_at"],
-            captured_by_account=raw["captured_by_account"],
-            captured_by_uid=raw["captured_by_uid"],
             capture_mode=raw["capture_mode"],
         )
 
@@ -130,26 +120,22 @@ def observe_capture(
 ) -> Acceptance:
     """Observe the capturing process, here, now.
 
-    Every value is taken by this authority from its own process rather than
+    Both values are taken by this authority from its own process rather than
     accepted from a caller, so a producer cannot assert a nicer story by
     passing one in. ``now`` and ``interactive`` exist for tests and for a
     producer that genuinely knows better about its own terminal (a TUI that
     owns the tty on a different descriptor, say).
+
+    Nothing about the user is read: no account name, no uid, no home, no
+    hostname (OD-BC).
     """
     moment = (now or _datetime.datetime.now(_datetime.timezone.utc)).astimezone(
         _datetime.timezone.utc
     )
     if interactive is None:
         interactive = _has_terminal()
-    uid = os.getuid()
-    try:
-        account = pwd.getpwuid(uid).pw_name
-    except KeyError:
-        account = f"uid-{uid}"
     return Acceptance(
         captured_at=moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        captured_by_account=account,
-        captured_by_uid=uid,
         capture_mode=INTERACTIVE_TTY if interactive else NO_TTY,
     )
 

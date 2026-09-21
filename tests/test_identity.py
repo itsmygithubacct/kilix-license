@@ -76,6 +76,48 @@ class RepositoryIdentityTests(unittest.TestCase):
         missing = sorted(path for path in tracked if not (ROOT / path).is_file())
         self.assertEqual([], missing, f"tracked files missing from disk: {missing}")
 
+    def test_the_shipping_rule_is_written_where_a_reader_meets_it(self) -> None:
+        # OD-BC. No flag in this repository can enforce "a receipt is never
+        # shipped": it is a rule about what is built, and its only enforcement
+        # is that somebody reads it. So it is pinned where a reader arrives -
+        # README.md, in the section about receipts - and cannot be quietly
+        # dropped while the code that motivates it stays.
+        # Whitespace-normalised, so a rule that is still there but re-wrapped
+        # does not read as a rule that was deleted.
+        raw_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        readme = " ".join(raw_readme.split())
+        for required in (
+            "never shipped, vendored or provisioned",
+            "not an acceptable remedy for a gate that refuses",
+            "acceptance at first use, or no weights",
+            "distinct schema",
+            "kilix.license.receipt/v1",
+            # and the honest statement of what a receipt is worth
+            "does not prove that a human accepted anything",
+            "does not say which",
+            "does not prove that the recorded time is the real time",
+        ):
+            with self.subTest(required=required):
+                # msg= instead of the whole README in the failure.
+                self.assertIn(
+                    required, readme,
+                    f"README.md no longer states {required!r}. OD-BC put this "
+                    "rule where a reader meets it because nothing else can "
+                    "enforce it; restore it rather than deleting this check.",
+                )
+        # OD-BC "record neither": no document may describe an identity field.
+        for forbidden in ("captured_by_account", "captured_by_uid"):
+            with self.subTest(forbidden=forbidden):
+                for name, text in (
+                    ("README.md", raw_readme),
+                    ("CHANGELOG.md", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")),
+                ):
+                    self.assertNotIn(
+                        forbidden, text,
+                        f"{name} names {forbidden!r}; OD-BC records neither "
+                        "identity field, so no document may imply one exists.",
+                    )
+
     def test_publication_disposition_is_explicit(self) -> None:
         disposition_text = (ROOT / "PUBLICATION.md").read_text(encoding="utf-8")
         found = {

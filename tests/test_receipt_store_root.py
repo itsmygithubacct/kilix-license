@@ -206,11 +206,12 @@ class ReceiptStoreRootTests(unittest.TestCase):
         self.assertEqual(read["outcome"], "COVERED", read)
         self.assertEqual(read["root"], written["root"])
         self.assertEqual(read["record_digest"], written["record_digest"])
-        # V-ACC-VERIFY F6: the receipt the writer filed says when it was
-        # captured, as whom, and whether there was a terminal.
+        # V-ACC-VERIFY F6 as OD-BC settled it: the receipt the writer filed
+        # says when it was captured and whether there was a terminal, and
+        # names nobody -- no account, no uid. The literal set is asserted, so
+        # an identity field reappearing fails here.
         self.assertEqual(
-            set(written["acceptance"]),
-            {"capture_mode", "captured_at", "captured_by_account", "captured_by_uid"},
+            set(written["acceptance"]), {"capture_mode", "captured_at"}
         )
         self.assertEqual(written["acceptance"]["capture_mode"], "no-tty")
 

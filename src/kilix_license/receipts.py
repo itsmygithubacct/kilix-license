@@ -39,8 +39,9 @@ CONTEXT_FIELDS = (
 # each bound text (SR-4). covers() never reads them. licence_text_id is
 # LIC4-FIX (LIC4-VERIFY LIC4-3): absent from receipts LIC4 wrote.
 #
-# LIC6 adds `acceptance` (V-ACC-VERIFY F6): what the authority observed about
-# the process that captured the agreement. Also recorded, never bound.
+# LIC6 adds `acceptance` (V-ACC-VERIFY F6, OD-BC): when, and at what kind of
+# console, this authority captured the agreement. Also recorded, never bound,
+# and it names nobody -- OD-BC records no account and no uid.
 OPTIONAL_CONTEXT_FIELDS = (
     "acceptance",
     "binding_text_ids",
@@ -81,9 +82,9 @@ class Receipt:
     statement_digests: dict[str, str] | None = None
     # LIC4-FIX context. None: the receipt names no licence text identity.
     licence_text_id: str | None = None
-    # LIC6 context (V-ACC-VERIFY F6). None: the receipt predates LIC6 and says
-    # nothing about when, as whom, or at what kind of console it was captured.
-    # It then serialises to exactly the bytes it was read from.
+    # LIC6 context (V-ACC-VERIFY F6, OD-BC). None: the receipt predates LIC6
+    # and says nothing about when, or at what kind of console, it was
+    # captured. It then serialises to exactly the bytes it was read from.
     acceptance: Acceptance | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
@@ -244,17 +245,17 @@ def receipt_from_agreement(
         raise AgreementRequired("agreement is not bound to the bytes shown")
     # V-ACC-VERIFY F6. An authority whose receipts optionally record nothing
     # about their own capture has not closed F6 at all: a producer would only
-    # have to build the Agreement by hand to mint the anonymous, timeless
-    # receipt the finding is about. Every receipt this authority mints says
-    # when, as whom and at what kind of console it was captured. Receipts
-    # written before LIC6 are unaffected: this is the write path, and reading
-    # them is unchanged.
+    # have to build the Agreement by hand to mint the timeless receipt the
+    # finding is about. Every receipt this authority mints says when, and at
+    # what kind of console, it was captured -- and nothing about who, which
+    # OD-BC decided is not recorded. Receipts written before LIC6 are
+    # unaffected: this is the write path, and reading them is unchanged.
     if agreement.acceptance is None:
         raise AgreementRequired(
             "agreement records no capture: build it with capture_agreement(), "
             "or pass an Acceptance from observe_capture() if the agreement was "
-            "captured elsewhere. A receipt must say when, as whom and at what "
-            "kind of console it was minted (V-ACC-VERIFY F6)."
+            "captured elsewhere. A receipt must say when, and at what kind of "
+            "console, it was minted (V-ACC-VERIFY F6, OD-BC)."
         )
     if agreement.record_digest is not None and agreement.record_digest != record.digest:
         raise AgreementRequired("agreement record digest does not match the record")
