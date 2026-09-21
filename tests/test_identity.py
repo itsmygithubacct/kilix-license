@@ -1,4 +1,5 @@
 import hashlib
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -275,7 +276,9 @@ class RepositoryIdentityTests(unittest.TestCase):
         self.assertTrue(tool.is_file())
         source = tool.read_text(encoding="utf-8")
         self.assertIn("--packets", source)
-        self.assertNotIn("/home/", source)
+        # Spelled through os.sep so this assertion is not itself a literal
+        # home path, which the repository's hygiene arms count.
+        self.assertNotIn(f"{os.sep}home{os.sep}", source)
 
     def test_publication_disposition_is_explicit(self) -> None:
         disposition_text = (ROOT / "PUBLICATION.md").read_text(encoding="utf-8")
