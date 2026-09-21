@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 import re
 
-from kilix_license.digest import canonical_json, load_json_object, sha256_hex
+from kilix_license.digest import (
+    canonical_json,
+    load_json_object,
+    require_sha256,
+    sha256_hex,
+)
 from kilix_license.errors import HandEditedRecord, TextDigestMismatch
 from kilix_license.records import (
     Advisory,
@@ -157,6 +162,37 @@ LICENCE_TEXT_IDS = {
     "documentfigureclassifier-v2.5": "github.com/spdx/license-list-data/text/MIT.txt",
     # "facebookresearch/encodec MIT LICENSE" (OD-AS code relicensing notice).
     CONVERTER_ID: "github.com/facebookresearch/encodec/LICENSE",
+}
+# LIC5 (C4-VERIFY F2, R4-068): the advisory the determinations quote for the two
+# EnCodec records is OD-AR's builder-facing *specification* of the screen. It
+# promises "a short verbatim-sourced licence-history note" and stands exactly
+# where that note belongs, so the screen makes a promise it does not keep. The
+# note itself is the text below. It is vendored into data/texts/ the way the
+# licence files were vendored at LIC2, and every line under a "quoted from"
+# header in it is copied byte for byte out of the L-ENC-R2 evidence packet
+# (licence-evidence-encodec-errata-2026-09-17, sha256sum -c SHA256SUMS 33/33).
+# No licence statement is retyped or paraphrased.
+#
+# Keyed by the determinations quote_id, so exactly the entries that carry that
+# advisory show the note, and a renamed quote cannot silently keep the stale
+# text: check_advisory_texts() refuses a key no determinations quote uses.
+#
+# Not bound (OD-AI, OD-AQ): an advisory digest is outside the record digest, so
+# this changes no receipt's coverage. It is recorded as receipt context.
+#
+# d62a39c2… is built from, with the lines it takes:
+#   licence-evidence-encodec-2026-09-15/sources/upstream-licence-history.txt
+#     sha256 1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90,
+#     lines 14 and 18 (L-ENC-R2 sources/quotes.json key PACKET_HISTORY): the
+#     2022 CC BY-NC and 2023 MIT README statements, as the READMEs state them.
+#   0.2.2-astra-coordination/OWNER-DECISIONS-2026-09-12.md
+#     sha256 aa5ddb6947732d1ae6d9f9431df136202636cf412d0ff1dbfa523531856ede90,
+#     lines 738 to 740 (L-ENC-R2 sources/quotes.json key OWNER_DECISIONS_OD_AR):
+#     OD-AR's own record that Meta never stated a licence for the weights.
+ADVISORY_TEXTS = {
+    "encodec-licence-history-note": (
+        "d62a39c2099d4a2ba224546b5ea1a34af14aefa9fb2d91418ddc18eeb3f0c391"
+    ),
 }
 _NON_ID = re.compile(r"[^a-z0-9._:-]+")
 _QUOTE_KEYS = (
@@ -329,6 +365,8 @@ def _quotes_as(
     cls: type,
     quotes: list[Any] | None,
     label: str,
+    *,
+    texts_dir: Path | None = None,
 ) -> tuple[Any, ...]:
     items = []
     seen: set[str] = set()
@@ -360,6 +398,19 @@ def _quotes_as(
                 )
             )
         elif cls is Advisory:
+            # LIC5: the note itself replaces the determinations quote where
+            # ADVISORY_TEXTS names one. The replacement must be committed in
+            # data/texts/ and match its digest, exactly as a licence file does.
+            replacement = ADVISORY_TEXTS.get(quote_id)
+            if replacement is not None:
+                require_sha256(replacement, f"ADVISORY_TEXTS[{quote_id!r}]")
+                if texts_dir is None:
+                    raise ValueError(
+                        f"{label}[{index}] advisory {quote_id!r} has a replacement "
+                        "text but no texts_dir to verify it against"
+                    )
+                load_text_file(texts_dir, replacement, f"advisory:{item_id}")
+                digest = replacement
             items.append(Advisory(id=item_id, text_sha256=digest))
         else:
             items.append(Statement(id=item_id, text_sha256=digest))
@@ -439,7 +490,9 @@ def record_from_entry(
             entry.get("binding_conditions"),
             f"{entry_id}.binding_conditions",
         ),
-        advisories=_quotes_as(Advisory, notes, f"{entry_id}.advisories"),
+        advisories=_quotes_as(
+            Advisory, notes, f"{entry_id}.advisories", texts_dir=texts_dir
+        ),
         statements=_quotes_as(Statement, statements, f"{entry_id}.statements"),
         determinations_sha256=pin,
         decision_class=generated,
@@ -572,6 +625,36 @@ def check_licence_text_ids(
         raise ValueError(f"licence text identities also name binding texts: {shared}")
 
 
+def check_advisory_texts(
+    payload: Mapping[str, Any],
+    table: Mapping[str, str] | None = None,
+) -> None:
+    """Refuse an advisory replacement the determinations no longer quote (LIC5).
+
+    ADVISORY_TEXTS names the note a determinations advisory quote is replaced
+    by. A key that matches no advisory or note quote is a stale override: the
+    quote was renamed or dropped, and the screen would silently fall back to
+    the text the replacement exists to keep off it. Every value must be a
+    sha256. Missing keys are not refused: an advisory without a replacement is
+    shown as the determinations quote it, which is the normal case.
+    """
+    if table is None:
+        table = ADVISORY_TEXTS
+    quoted: set[str] = set()
+    for entry in payload.get("entries") or []:
+        for key in ("advisories", "notes"):
+            for quote in entry.get(key) or []:
+                if isinstance(quote, dict) and isinstance(quote.get("quote_id"), str):
+                    quoted.add(quote["quote_id"])
+    for quote_id, digest in sorted(table.items()):
+        require_sha256(digest, f"ADVISORY_TEXTS[{quote_id!r}]")
+    unused = sorted(set(table) - quoted)
+    if unused:
+        raise ValueError(
+            f"advisory replacement texts name no determinations quote: {unused}"
+        )
+
+
 def generate_records(
     payload: Mapping[str, Any],
     *,
@@ -580,6 +663,7 @@ def generate_records(
 ) -> list[LicenseRecord]:
     check_binding_text_ids(payload)
     check_licence_text_ids(payload)
+    check_advisory_texts(payload)
     records: list[LicenseRecord] = []
     seen: set[str] = set()
     for entry in payload.get("entries") or []:

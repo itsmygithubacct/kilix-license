@@ -4,6 +4,15 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- The EnCodec first-use screen shows the licence-history note itself
+  instead of OD-AR's builder-facing sentence describing it. The note is a
+  vendored text under `data/texts/`, quoting the 2022 CC BY-NC and 2023
+  MIT README statements and OD-AR's own record that no licence for the
+  weights was ever stated, byte for byte from the L-ENC-R2 evidence
+  packet. `ADVISORY_TEXTS` binds it to both EnCodec records; a stale or
+  malformed entry, and a missing or altered note, are refused. Advisories
+  stay outside the record digest (OD-AQ), so both EnCodec record digests
+  and every receipt's coverage are unchanged.
 - Licence texts carry a generated document identity, `licence_text_id`,
   outside the record digest (every record digest is unchanged), so a
   licence text revised through a sibling record is marked changed. Receipts

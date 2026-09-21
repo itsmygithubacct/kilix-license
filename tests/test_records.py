@@ -16,14 +16,21 @@ from unittest import mock
 
 from kilix_license.agreement import capture_agreement, typed_agreement_line
 from kilix_license.catalog import load_determined_records, load_determined_texts
-from kilix_license.errors import AgreementRequired, HandEditedRecord, ParaphraseRefused
+from kilix_license.errors import (
+    AgreementRequired,
+    HandEditedRecord,
+    ParaphraseRefused,
+    TextDigestMismatch,
+)
 from kilix_license.generate import (
+    ADVISORY_TEXTS,
     BINDING_TEXT_IDS,
     CONVERTER_ID,
     LICENCE_TEXT_IDS,
     FORBIDDEN_PREFIXES,
     PDF_ENGINE_RECORD_IDS,
     REQUIRED_RECORD_IDS,
+    check_advisory_texts,
     check_binding_text_ids,
     check_licence_text_ids,
     check_records,
@@ -659,3 +666,177 @@ class LicenceTextIdentityTests(unittest.TestCase):
         with mock.patch.dict("kilix_license.generate.LICENCE_TEXT_IDS", split):
             with self.assertRaises(ValueError):
                 generate_records(self.payload, pin=self.pin, texts_dir=self.texts_dir)
+
+
+class AdvisoryNoteTests(unittest.TestCase):
+    """LIC5 (C4-VERIFY F2, R4-068): the EnCodec screen shows the note, not its spec."""
+
+    # The two sources the committed note quotes, as the note itself names them.
+    # These are file digests, not licence statements: nothing here is retyped.
+    HISTORY_SHA256 = "1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90"
+    OWNER_DECISIONS_SHA256 = (
+        "aa5ddb6947732d1ae6d9f9431df136202636cf412d0ff1dbfa523531856ede90"
+    )
+    ENCODEC_IDS = ("encodec-24khz-stateful", "encodec-48khz-frame")
+    ADVISORY_ID = "encodec-licence-history-note"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data, cls.payload, cls.pin = load_determinations(DATA)
+        cls.texts_dir = DATA / "texts"
+        cls.records = generate_records(cls.payload, pin=cls.pin, texts_dir=cls.texts_dir)
+        cls.by_id = {record.id: record for record in cls.records}
+        cls.entries = {entry["entry_id"]: entry for entry in cls.payload["entries"]}
+        cls.note_digest = ADVISORY_TEXTS[cls.ADVISORY_ID]
+
+    def _screen(self, record_id: str) -> bytes:
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-license-lic5-screen-"))
+        texts = load_determined_texts(scratch / "texts")
+        receipts = FakeStore(scratch / "receipts")
+        index = load_determined_records()
+        return render_screen(
+            index.by_id(record_id), texts, receipts=receipts, records=index
+        )
+
+    def test_both_encodec_records_bind_the_note(self) -> None:
+        for record_id in self.ENCODEC_IDS:
+            with self.subTest(record=record_id):
+                record = self.by_id[record_id]
+                self.assertEqual(
+                    [(a.id, a.text_sha256) for a in record.advisories],
+                    [(self.ADVISORY_ID, self.note_digest)],
+                )
+        first, second = (self.by_id[r] for r in self.ENCODEC_IDS)
+        self.assertEqual(first.advisories, second.advisories)
+
+    def test_the_note_is_committed_and_matches_its_digest(self) -> None:
+        path = self.texts_dir / self.note_digest
+        self.assertTrue(path.is_file(), self.note_digest)
+        self.assertEqual(
+            hashlib.sha256(path.read_bytes()).hexdigest(), self.note_digest
+        )
+        tracked = tracked_files()
+        if not tracked:
+            self.skipTest("not a git checkout; tracked set unobservable")
+        self.assertIn(
+            f"src/kilix_license/data/texts/{self.note_digest}", tracked
+        )
+
+    def test_the_spec_sentence_is_off_the_screen_and_the_note_is_on_it(self) -> None:
+        # The defect: OD-AR's builder-facing specification of the screen stood
+        # where the note belongs. Its bytes come from the determinations, never
+        # retyped here.
+        note = (self.texts_dir / self.note_digest).read_bytes()
+        for record_id in self.ENCODEC_IDS:
+            quote = self.entries[record_id]["advisories"][0]
+            self.assertEqual(quote["quote_id"], self.ADVISORY_ID)
+            spec = quote["text"].encode("utf-8")
+            self.assertNotEqual(quote["text_sha256"], self.note_digest)
+            with self.subTest(record=record_id):
+                screen = self._screen(record_id)
+                header = f"=== advisory:{self.ADVISORY_ID} ===\n".encode("utf-8")
+                self.assertIn(header + note, screen)
+                self.assertNotIn(spec, screen)
+
+    def test_the_note_names_both_sources_it_quotes(self) -> None:
+        note = (self.texts_dir / self.note_digest).read_text(encoding="utf-8")
+        headers = [
+            line for line in note.splitlines() if line.startswith("quoted from ")
+        ]
+        self.assertEqual(len(headers), 2, headers)
+        self.assertIn(self.HISTORY_SHA256, note)
+        self.assertIn(self.OWNER_DECISIONS_SHA256, note)
+        self.assertTrue(note.endswith("\n"))
+
+    def test_the_note_is_outside_the_record_digest(self) -> None:
+        # OD-AI/OD-AQ: an advisory is context. Replacing it moves no record
+        # digest, so no receipt's coverage changes and no consumer re-pins.
+        pinned = {}
+        for line in (ROOT / "tests" / "data" / "record-digests-fbdfb546.txt").read_text(
+            encoding="utf-8"
+        ).splitlines():
+            digest, record_id = line.split("  ", 1)
+            pinned[record_id] = digest
+        for record_id in self.ENCODEC_IDS:
+            record = self.by_id[record_id]
+            self.assertEqual(record.digest, pinned[record_id])
+            planted = replace(
+                record,
+                advisories=(
+                    replace(record.advisories[0], text_sha256="0" * 64),
+                ),
+            )
+            self.assertEqual(planted.digest, record.digest)
+
+    def test_a_missing_or_altered_note_text_is_refused(self) -> None:
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-license-lic5-note-"))
+        dest = scratch / "data"
+        shutil.copytree(DATA, dest)
+        texts = dest / "texts"
+        note = texts / self.note_digest
+        altered = note.read_bytes() + b"tampered\n"
+        note.write_bytes(altered)
+        with self.assertRaises(TextDigestMismatch) as caught:
+            generate_records(self.payload, pin=self.pin, texts_dir=texts)
+        self.assertIn(self.note_digest, str(caught.exception))
+        note.unlink()
+        with self.assertRaises(FileNotFoundError) as missing:
+            generate_records(self.payload, pin=self.pin, texts_dir=texts)
+        self.assertIn(self.note_digest, str(missing.exception))
+
+    def test_check_advisory_texts_refuses_a_stale_or_malformed_table(self) -> None:
+        check_advisory_texts(self.payload)
+        stale = dict(ADVISORY_TEXTS, **{"encodec-licence-history-note-2026": "a" * 64})
+        with self.assertRaises(ValueError) as caught:
+            check_advisory_texts(self.payload, stale)
+        self.assertIn("no determinations quote", str(caught.exception))
+        self.assertIn("encodec-licence-history-note-2026", str(caught.exception))
+        malformed = dict(ADVISORY_TEXTS, **{self.ADVISORY_ID: "not-a-sha256"})
+        with self.assertRaises(ValueError):
+            check_advisory_texts(self.payload, malformed)
+
+    def test_a_renamed_advisory_quote_must_be_remapped(self) -> None:
+        planted = json.loads(self.data.decode("utf-8"))
+        renamed = "encodec-licence-history-note-2026"
+        for entry_id in self.ENCODEC_IDS:
+            entry = next(e for e in planted["entries"] if e["entry_id"] == entry_id)
+            entry["advisories"][0]["quote_id"] = renamed
+        # Left unmapped, the rename is refused rather than silently restoring
+        # the determinations quote to the screen.
+        with self.assertRaises(ValueError) as caught:
+            generate_records(planted, pin=self.pin, texts_dir=self.texts_dir)
+        self.assertIn(self.ADVISORY_ID, str(caught.exception))
+        table = {renamed: self.note_digest}
+        with mock.patch.dict(
+            "kilix_license.generate.ADVISORY_TEXTS", table, clear=True
+        ):
+            generated = {
+                r.id: r
+                for r in generate_records(
+                    planted, pin=self.pin, texts_dir=self.texts_dir
+                )
+            }
+        for record_id in self.ENCODEC_IDS:
+            advisory = generated[record_id].advisories[0]
+            self.assertEqual(advisory.id, renamed)
+            self.assertEqual(advisory.text_sha256, self.note_digest)
+
+    def test_an_advisory_with_no_replacement_stays_the_determinations_quote(self) -> None:
+        # Control: every other advisory and note is still the quoted bytes.
+        replaced = set(ADVISORY_TEXTS)
+        self.assertEqual(replaced, {self.ADVISORY_ID})
+        checked = 0
+        for entry_id, entry in self.entries.items():
+            quotes = list(entry.get("advisories") or []) + list(entry.get("notes") or [])
+            for quote in quotes:
+                if quote["quote_id"] in replaced:
+                    continue
+                record = self.by_id[entry_id]
+                advisory = next(
+                    a for a in record.advisories if a.id == quote["quote_id"]
+                )
+                self.assertEqual(advisory.text_sha256, quote["text_sha256"])
+                stored = (self.texts_dir / advisory.text_sha256).read_bytes()
+                self.assertEqual(stored, quote["text"].encode("utf-8"))
+                checked += 1
+        self.assertGreater(checked, 0)

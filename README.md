@@ -39,6 +39,17 @@ regular file of at most 1 MiB before one byte is read. Reads stop at
 receipt that fails this is not a receipt: `require` refuses with
 `CoverageRefused` and never waits on it.
 
+Most bound and context texts are the determinations JSON's own quoted
+spans. One is not: the EnCodec `encodec-licence-history-note` advisory. The
+determinations quote there is OD-AR's builder-facing description of the
+screen, so `ADVISORY_TEXTS` binds the note itself instead - a text vendored
+under `data/texts/` whose quoted lines are copied byte for byte from the
+L-ENC-R2 evidence packet, with the file, lines and digests recorded beside
+the table. The generator refuses a table entry no determinations quote uses,
+an entry that is not a sha256, and a note that is missing or does not match
+its digest. An advisory is not bound (OD-AQ), so the EnCodec record digests
+and every receipt's coverage are unchanged by it.
+
 Receipts written from LIC4 on also record, as context that is not bound
 (OD-AQ), the statement and component-exception digests shown on the screen
 and each binding's text identity; from LIC4-FIX on they also record the
