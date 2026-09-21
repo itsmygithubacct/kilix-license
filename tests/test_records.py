@@ -32,6 +32,8 @@ from kilix_license.generate import (
     FORBIDDEN_PREFIXES,
     PDF_ENGINE_RECORD_IDS,
     REQUIRED_RECORD_IDS,
+    authored_lines,
+    check_advisory_note_prose,
     check_advisory_note_sources,
     check_advisory_texts,
     check_binding_text_ids,
@@ -45,11 +47,13 @@ from kilix_license.generate import (
     licensors_of,
     load_determinations,
     load_pin,
+    parse_advisory_note,
     parse_quoted_blocks,
     quote_blobs,
     record_filename,
     record_from_entry,
     render_record_bytes,
+    states_a_licence,
     write_quote_texts,
 )
 from kilix_license.paraphrase import POCKET_TERMS_SUMMARY_BYTES
@@ -705,6 +709,7 @@ class AdvisoryNoteTests(unittest.TestCase):
     ENCODEC_IDS = ("encodec-24khz-stateful", "encodec-48khz-frame")
     ADVISORY_ID = "encodec-licence-history-note"
     SOURCES = ROOT / "tests" / "data" / "note-sources"
+    PACKET_RECORDS = SOURCES / "packet-records"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -837,6 +842,124 @@ class AdvisoryNoteTests(unittest.TestCase):
                         allowed.add((first, changed[0]))
                 self.assertIn(source.lines, allowed)
 
+    def test_no_line_the_note_wrote_itself_states_a_licence(self) -> None:
+        # LIC5-FIX-VERIFY F1, mutant M11. The guard above covers what the note
+        # QUOTES. M11 put "Meta relicensed the encodec weights to Apache-2.0 in
+        # 2024; commercial use is permitted." in the note's preamble -- above
+        # the first "quoted from" header, so outside the note's own promise --
+        # and the whole suite stayed green while a first-use accept screen
+        # carried a fabricated licence claim.
+        #
+        # The rule: a line nobody upstream wrote may introduce, attribute and
+        # cite, and may not say what a licence is. It binds the preamble and
+        # each block's three header lines, which is every authored line there
+        # is; nothing outside a quoted block is unguarded any more.
+        note = (self.texts_dir / self.note_digest).read_bytes()
+        authored = authored_lines(note)
+        self.assertGreaterEqual(len(authored), 4, authored)
+        check_advisory_note_prose(self.note_digest, authored)
+
+        # The detector is live, proved against the upstream language itself:
+        # every quoted block contains a line this same pattern flags. A regex
+        # that had stopped matching fails here instead of passing everywhere.
+        for position, (source, quoted) in enumerate(parse_quoted_blocks(note), 1):
+            flagged = [
+                line
+                for line in quoted.decode("utf-8").splitlines()
+                if states_a_licence(line) is not None
+            ]
+            with self.subTest(block=position, lines=source.lines):
+                self.assertTrue(flagged, quoted.decode("utf-8"))
+
+        # M11 itself, planted in the shipped note's preamble.
+        planted = note.replace(
+            b"\n\nquoted from ",
+            b"\nMeta relicensed the encodec weights to Apache-2.0 in 2024; "
+            b"commercial use is permitted.\n\nquoted from ",
+            1,
+        )
+        self.assertNotEqual(planted, note)
+        with self.assertRaises(ValueError) as caught:
+            check_advisory_note_prose(self.note_digest, authored_lines(planted))
+        self.assertIn("states a licence", str(caught.exception))
+        # and reached the way a record is generated, not only by direct call.
+        with self.assertRaises(ValueError):
+            check_advisory_note_sources(self.note_digest, planted)
+
+        # The same sentence in a block's attribution header, which is where
+        # LIC5-FIX-VERIFY F2's orienting clause now lives, is refused too.
+        header = planted.replace(
+            b"\nMeta relicensed the encodec weights to Apache-2.0 in 2024; "
+            b"commercial use is permitted.",
+            b"",
+        ).replace(
+            b" repository that states a licence for model weights",
+            b" repository relicensed to Apache-2.0 that states a licence for model weights",
+            1,
+        )
+        self.assertNotEqual(header, note)
+        with self.assertRaises(ValueError):
+            check_advisory_note_prose(self.note_digest, authored_lines(header))
+
+        # A note with no preamble at all is refused rather than accepted as
+        # trivially claim-free.
+        headless = note[note.index(b"quoted from ") :]
+        with self.assertRaises(ValueError):
+            authored_lines(headless)
+
+    def test_the_quoted_sources_digest_has_a_second_witness_in_the_packet(self) -> None:
+        # LIC5-FIX-VERIFY F3, mutant M8. The source file is pinned under
+        # tests/data/note-sources/<its own sha256>, so a seat that forges the
+        # file AND renames it to its new digest AND updates the note and the
+        # declaration is self-consistent and green: the chain of trust ends in
+        # this tree. M8 shipped a fabricated "Everything in this repository is
+        # released under the MIT license" that way.
+        #
+        # The L-ENC-R2 packet records the same file independently -- its path,
+        # its sha256, and the text of lines 13-20 -- in sources/quotes.json
+        # under PACKET_HISTORY. That object is vendored beside the source, and
+        # is a second witness: forging the source now also means forging the
+        # packet's record of it, and the digest of the packet file that record
+        # came from is the one the note shows the user in its preamble.
+        #
+        # It is a PARTIAL close. The packet records no copy of lines 91-94, so
+        # block 2 has one witness and this test says which lines are covered.
+        declared = ADVISORY_TEXT_SOURCES[self.note_digest]
+        note = (self.texts_dir / self.note_digest).read_text(encoding="utf-8")
+        preamble = note[: note.index("quoted from ")]
+        covered: dict[tuple[int, ...], tuple[int, ...]] = {}
+        for source in declared:
+            with self.subTest(source=source.path, lines=source.lines):
+                record_path = self.PACKET_RECORDS / f"{source.sha256}.json"
+                self.assertTrue(
+                    record_path.is_file(),
+                    f"no packet record vendored for {source.sha256}; a declared "
+                    "source with no second witness is exactly LIC5-FIX-VERIFY F3",
+                )
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                # Witness 1: the digest the note and the declaration claim.
+                self.assertEqual(record["sha256"], source.sha256)
+                self.assertTrue(source.path.endswith(record["path"]), record["path"])
+                # The packet file that record came from is the one the note
+                # shows the user, so forging it is visible on the screen.
+                self.assertIn(record["vendored_from"]["sha256"], preamble)
+                self.assertIn(record["vendored_from"]["packet"], preamble)
+                # Witness 2: the packet's own copy of each line the note quotes.
+                pinned = (self.SOURCES / source.sha256).read_text(encoding="utf-8")
+                lines = pinned.split("\n")
+                witnessed = []
+                for number in source.lines:
+                    recorded = record["lines"].get(str(number))
+                    if recorded is None:
+                        continue
+                    self.assertEqual(recorded, lines[number - 1])
+                    witnessed.append(number)
+                covered[source.lines] = tuple(witnessed)
+        self.assertTrue(
+            any(lines == witnessed for lines, witnessed in covered.items()),
+            f"no declared block is fully witnessed by the packet: {covered}",
+        )
+
     def test_a_note_whose_header_disagrees_with_its_sources_is_refused(self) -> None:
         # The guard behind F1, on the generator side: the same shifted-slice
         # and misdeclared-header shapes, planted, must not generate.
@@ -916,7 +1039,21 @@ class AdvisoryNoteTests(unittest.TestCase):
         self.assertIn(
             f"encodec_48khz model.safetensors 76291152 lfs_sha256 {full[0]}", data
         )
-        self.assertNotIn(full[0], self.data.decode("utf-8"))
+        # LIC5-FIX-VERIFY F5: when this fires it is good news, and without a
+        # msg= it fires by inlining 50 KB of determinations.json into the
+        # failure. Say what to do instead. (unittest prints msg= INSTEAD of
+        # the standard explanation, which is the point: the seat gets an
+        # instruction, not a wall of JSON.)
+        self.assertNotIn(
+            full[0],
+            self.data.decode("utf-8"),
+            f"the 48 kHz model.safetensors digest {full[0]} is now pinned in "
+            "determinations.json. That is the outcome this test exists to "
+            "force: move the displayed statement's pin there (it is an owner "
+            "quote, so un-eliding it is an owner/determinations change), then "
+            "delete this assertion and the fixture pin it stands in for. "
+            "LIC5-VERIFY F7, carried by LIC5-FIX-IMPL section 12 item 1.",
+        )
 
     def test_the_note_is_outside_the_record_digest(self) -> None:
         # OD-AI/OD-AQ: an advisory is context. Replacing it moves no record

@@ -191,7 +191,7 @@ class QuotedSource:
 # this changes no receipt's coverage. It is recorded as receipt context.
 ADVISORY_TEXTS = {
     "encodec-licence-history-note": (
-        "d32048478f577f8164b28633575fb16e7a77a184bbf375b0ce106416eb315904"
+        "8cfc463c41113f776eebc60642a0e4f9841aaff247d9659d8abc466743755260"
     ),
 }
 # LIC5-FIX (LIC5-VERIFY F1, F2, F3, F5): what each replacement note quotes, as
@@ -218,7 +218,7 @@ ADVISORY_TEXTS = {
 # for code, next to encodec's own statements about "this repository" and "the
 # code". Every digest the note cites now resolves to a file that exists.
 ADVISORY_TEXT_SOURCES = {
-    "d32048478f577f8164b28633575fb16e7a77a184bbf375b0ce106416eb315904": (
+    "8cfc463c41113f776eebc60642a0e4f9841aaff247d9659d8abc466743755260": (
         # The 2022 CC BY-NC state and the 2023 MIT relicensing, as the upstream
         # READMEs state them (L-ENC-R2 sources/quotes.json key PACKET_HISTORY
         # records this path and this digest, and lines 14 and 18 themselves).
@@ -243,6 +243,41 @@ ADVISORY_TEXT_SOURCES = {
 }
 _QUOTED_FROM = "quoted from "
 _QUOTED_SHA = re.compile(r"^sha256 ([0-9a-f]{64}), lines? (.+)$")
+# LIC5-FIX-VERIFY F1, mutant M11. The guard above covers what a note *quotes*.
+# A note also has authored lines -- the preamble, and each block's three header
+# lines -- and M11 put "Meta relicensed the encodec weights to Apache-2.0 in
+# 2024; commercial use is permitted." into the preamble of the text a user has
+# to agree to, with the whole suite green. The note stayed literally true
+# (its promise is scoped to lines *below* a "quoted from" header) and the screen
+# carried a false licence claim anyway.
+#
+# The rule that closes it is the one the note is for: **licence statements on
+# this screen come from upstream's bytes, never from us.** So no authored line
+# in a note may make a licence claim. This is not a copy of the preamble's
+# text, so a mutant cannot make it agree by editing a declaration: it has to
+# stop claiming a licence, which is the whole point. It binds the header lines
+# too, which is where LIC5-FIX-VERIFY F2's orienting clause now lives.
+#
+# What it looks for: a licence identifier, or the language of permission and
+# relicensing. Bare "LICENSE"/"licence" is a filename and a topic, not a claim,
+# and is not matched -- the note is titled "EnCodec licence history". The test
+# proves the detector is live by requiring every quoted block to contain a line
+# it flags, so a regex that had stopped matching would fail rather than pass.
+_LICENCE_CLAIM = re.compile(
+    r"(?i)\b(?:"
+    r"MIT|ISC|Unlicense|WTFPL|Zlib|SPDX"
+    r"|BSD[- ]\d[\w.-]*"
+    r"|Apache(?:[- ]2(?:\.0)?)?"
+    r"|(?:GNU[ -])?[AL]?GPL[\w.-]*"
+    r"|MPL[- ]?\d[\w.]*"
+    r"|CC[- ]?(?:BY|0)[\w.-]*"
+    r"|Creative Commons"
+    r"|non-?commercial|commercial use"
+    r"|relicens\w+|re-licens\w+"
+    r"|permissive|permitted|permits|public domain|royalty[- ]free"
+    r"|released under|licensed under|licence is|license is"
+    r")\b"
+)
 _NON_ID = re.compile(r"[^a-z0-9._:-]+")
 _QUOTE_KEYS = (
     "binding_conditions",
@@ -694,6 +729,25 @@ def _quoted_line_numbers(spec: str, label: str) -> tuple[int, ...]:
 def parse_quoted_blocks(data: bytes, label: str = "advisory note") -> tuple[
     tuple[QuotedSource, bytes], ...
 ]:
+    """The note's quoted blocks. See parse_advisory_note for the whole note."""
+    return parse_advisory_note(data, label)[1]
+
+
+def authored_lines(
+    data: bytes, label: str = "advisory note"
+) -> tuple[tuple[int, str], ...]:
+    """Every line of an advisory note that nobody upstream wrote.
+
+    That is: the preamble, and each block's three header lines. Blank lines are
+    left out. Everything else in the note is a quoted line, whose bytes
+    parse_advisory_note already re-derives from the named source.
+    """
+    return parse_advisory_note(data, label)[0]
+
+
+def parse_advisory_note(data: bytes, label: str = "advisory note") -> tuple[
+    tuple[tuple[int, str], ...], tuple[tuple[QuotedSource, bytes], ...]
+]:
     """Read an advisory note's "quoted from" blocks: what it claims, and what it quotes.
 
     LIC5-VERIFY F1. The note promises the user that every line under such a
@@ -706,9 +760,11 @@ def parse_quoted_blocks(data: bytes, label: str = "advisory note") -> tuple[
         <blank>
         <one or more quoted lines>
 
-    and blocks are separated by one blank line. Returns each header as a
-    QuotedSource with the block's quoted bytes, so a caller with the source
-    file can compare them line for line.
+    and blocks are separated by one blank line. Returns two things: every
+    authored line (the preamble, and each block's three header lines) as
+    (1-based line number, text), and each header as a QuotedSource with the
+    block's quoted bytes, so a caller with the source file can compare them
+    line for line.
     """
     text = data.decode("utf-8")
     lines = text.split("\n")
@@ -718,6 +774,7 @@ def parse_quoted_blocks(data: bytes, label: str = "advisory note") -> tuple[
     starts = [i for i, line in enumerate(lines) if line.startswith(_QUOTED_FROM)]
     if not starts:
         raise ValueError(f"{label} has no {_QUOTED_FROM.strip()!r} header")
+    quoted_index: set[int] = set()
     blocks: list[tuple[QuotedSource, bytes]] = []
     for position, start in enumerate(starts):
         where = f"{label} block {position + 1}"
@@ -742,6 +799,7 @@ def parse_quoted_blocks(data: bytes, label: str = "advisory note") -> tuple[
         quoted = lines[start + 4 : stop]
         if not quoted or any(line == "" for line in quoted):
             raise ValueError(f"{where} quotes no lines, or quotes a blank line")
+        quoted_index.update(range(start + 4, stop))
         blocks.append(
             (
                 QuotedSource(
@@ -752,7 +810,14 @@ def parse_quoted_blocks(data: bytes, label: str = "advisory note") -> tuple[
                 ("\n".join(quoted) + "\n").encode("utf-8"),
             )
         )
-    return tuple(blocks)
+    if not any(line for index, line in enumerate(lines) if index < starts[0]):
+        raise ValueError(f"{label} has no preamble before its first block")
+    authored = tuple(
+        (index + 1, line)
+        for index, line in enumerate(lines)
+        if index not in quoted_index and line != ""
+    )
+    return authored, tuple(blocks)
 
 
 def check_advisory_note_sources(
@@ -774,11 +839,51 @@ def check_advisory_note_sources(
     declared = table.get(digest)
     if declared is None:
         raise ValueError(f"advisory replacement text {digest} declares no sources")
-    found = tuple(source for source, _ in parse_quoted_blocks(data, f"advisory note {digest}"))
+    authored, blocks = parse_advisory_note(data, f"advisory note {digest}")
+    found = tuple(source for source, _ in blocks)
     if found != tuple(declared):
         raise ValueError(
             f"advisory note {digest} quotes {found}, "
             f"but ADVISORY_TEXT_SOURCES declares {tuple(declared)}"
+        )
+    check_advisory_note_prose(digest, authored)
+
+
+def states_a_licence(line: str) -> str | None:
+    """The licence claim in one line of authored note prose, or None.
+
+    Bare "licence"/"LICENSE" is a topic and a filename, not a claim; what is
+    matched is a licence identifier, or the language of permission and
+    relicensing. The suite proves this is live by requiring every quoted block
+    in a shipped note to contain a line it flags.
+    """
+    found = _LICENCE_CLAIM.search(line)
+    return found.group(0) if found is not None else None
+
+
+def check_advisory_note_prose(
+    digest: str, authored: tuple[tuple[int, str], ...]
+) -> None:
+    """Refuse a note that states a licence in a line nobody upstream wrote.
+
+    LIC5-FIX-VERIFY F1 (mutant M11). The note's quoted blocks are re-derived
+    from their named sources byte for byte; its authored lines were checked by
+    nothing, and a fabricated "Apache-2.0 ... commercial use is permitted"
+    shipped green on the accept screen. An advisory note exists to carry what
+    upstream said; if a line is ours, it may introduce, attribute and cite, and
+    it may not say what the licence is.
+    """
+    claims = [
+        (number, line, states_a_licence(line))
+        for number, line in authored
+        if states_a_licence(line) is not None
+    ]
+    if claims:
+        number, line, hit = claims[0]
+        raise ValueError(
+            f"advisory note {digest} line {number} is not quoted from any "
+            f"source and states a licence ({hit!r}): {line!r}. Only lines "
+            "under a 'quoted from' header may say what a licence is."
         )
 
 

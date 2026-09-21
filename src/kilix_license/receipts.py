@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from kilix_license.agreement import Agreement, typed_agreement_line
+from kilix_license.agreement import Acceptance, Agreement, typed_agreement_line
 from kilix_license.digest import (
     canonical_json,
     load_json_object,
@@ -38,7 +38,11 @@ CONTEXT_FIELDS = (
 # record what was on the screen (OD-AQ, C2E-VERIFY F6) and the identity of
 # each bound text (SR-4). covers() never reads them. licence_text_id is
 # LIC4-FIX (LIC4-VERIFY LIC4-3): absent from receipts LIC4 wrote.
+#
+# LIC6 adds `acceptance` (V-ACC-VERIFY F6): what the authority observed about
+# the process that captured the agreement. Also recorded, never bound.
 OPTIONAL_CONTEXT_FIELDS = (
+    "acceptance",
     "binding_text_ids",
     "component_exception_digests",
     "licence_text_id",
@@ -77,6 +81,10 @@ class Receipt:
     statement_digests: dict[str, str] | None = None
     # LIC4-FIX context. None: the receipt names no licence text identity.
     licence_text_id: str | None = None
+    # LIC6 context (V-ACC-VERIFY F6). None: the receipt predates LIC6 and says
+    # nothing about when, as whom, or at what kind of console it was captured.
+    # It then serialises to exactly the bytes it was read from.
+    acceptance: Acceptance | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
         context: dict[str, Any] = {
@@ -88,7 +96,12 @@ class Receipt:
             value = getattr(self, field)
             if value is None:
                 continue
-            context[field] = value if isinstance(value, str) else dict(sorted(value.items()))
+            if isinstance(value, Acceptance):
+                context[field] = value.to_jsonable()
+            else:
+                context[field] = (
+                    value if isinstance(value, str) else dict(sorted(value.items()))
+                )
         return {
             "binding_condition_text_digests": dict(
                 sorted(self.binding_condition_text_digests.items())
@@ -197,6 +210,10 @@ def parse_receipt(raw: Mapping[str, Any]) -> Receipt:
         extra["licence_text_id"] = require_text_id(
             context.get("licence_text_id"), "licence_text_id"
         )
+    if "acceptance" in context:
+        extra["acceptance"] = Acceptance.from_mapping(
+            context.get("acceptance"), "acceptance"
+        )
     return replace(receipt, **extra) if extra else receipt
 
 
@@ -225,6 +242,20 @@ def receipt_from_agreement(
         raise AgreementRequired("accept receipt requires the typed agreement line")
     if agreement.record_digest is None and agreement.binding_condition_text_digests is None:
         raise AgreementRequired("agreement is not bound to the bytes shown")
+    # V-ACC-VERIFY F6. An authority whose receipts optionally record nothing
+    # about their own capture has not closed F6 at all: a producer would only
+    # have to build the Agreement by hand to mint the anonymous, timeless
+    # receipt the finding is about. Every receipt this authority mints says
+    # when, as whom and at what kind of console it was captured. Receipts
+    # written before LIC6 are unaffected: this is the write path, and reading
+    # them is unchanged.
+    if agreement.acceptance is None:
+        raise AgreementRequired(
+            "agreement records no capture: build it with capture_agreement(), "
+            "or pass an Acceptance from observe_capture() if the agreement was "
+            "captured elsewhere. A receipt must say when, as whom and at what "
+            "kind of console it was minted (V-ACC-VERIFY F6)."
+        )
     if agreement.record_digest is not None and agreement.record_digest != record.digest:
         raise AgreementRequired("agreement record digest does not match the record")
     if agreement.binding_condition_text_digests is not None:
@@ -250,4 +281,8 @@ def receipt_from_agreement(
         component_exception_digests=record.component_exception_digests(),
         statement_digests=record.statement_digests(),
         licence_text_id=record.licence_text_id,
+        # V-ACC-VERIFY F6: what was observed when the agreement was captured,
+        # not when this receipt was assembled. An Agreement built by hand
+        # carries none, and then neither does the receipt.
+        acceptance=agreement.acceptance,
     )

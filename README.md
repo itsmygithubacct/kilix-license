@@ -62,12 +62,65 @@ every quoted line from it and compares bytes, using the line numbers the
 note itself claims. Adding or dropping a quoted block is a change to that
 one table: nothing else names the note's sources.
 
+The note's own lines - its preamble and each block's three header lines -
+are the only text in it that upstream did not write, and they may not say
+what a licence is. `states_a_licence` looks for a licence identifier or the
+language of permission and relicensing, and the generator refuses a note
+with such a line outside a quoted block. This is the rule the note exists
+for: licence statements on a first-use screen come from upstream's bytes,
+never from us. An authored line may still introduce, attribute and cite,
+which is where the orientation on a quoted block comes from.
+
+Each declared source also carries a second, independent witness where one
+exists: the evidence packet's own record of the file, vendored beside it
+under `tests/data/note-sources/packet-records/<source sha256>.json`. The
+suite checks the declared digest and each quoted line against that record,
+and checks that the record's own packet digest is the one the note shows
+the user. That is a partial close, not a full one: the packet records no
+copy of the audiocraft lines, so block 2 has one witness, and both
+witnesses are in this tree. `tools/verify_note_sources.py --packets DIR`
+re-derives both from the evidence packets themselves when they are to
+hand; it takes the directory as an argument and no path is committed.
+
+## Where receipts live
+
+There is one receipt store root, and this authority names it (OD-AJ):
+`receipt_store_root()`, which is `$GPU_TERMINAL_HOME/license-receipts` and
+is overridden outright by `$KILIX_LICENSE_RECEIPTS`. Producers and
+consumers reach it as `ReceiptStore.shared()`, which takes no path; a
+caller that hands in a path gets it checked, and anything but the agreed
+root raises `ReceiptStoreRootRefused` naming both. `ReceiptStore(root)` is
+unchanged and still opens any directory, for fixtures and inspection.
+
+This exists because the two sides each used to choose: an acceptance filed
+by one component was invisible to another, and the symptom was a gate
+refusing a licence the user had just accepted. A consumer that composes its
+own path, or adds its own override variable, re-opens that.
+
 Receipts written from LIC4 on also record, as context that is not bound
 (OD-AQ), the statement and component-exception digests shown on the screen
 and each binding's text identity; from LIC4-FIX on they also record the
 licence text identity. Receipts without those keys, as written before LIC4
 or LIC4-FIX, are still read and still cover; their identities are resolved
 through the record their licence id names (pass `records=`).
+
+From LIC6 a receipt also records an `acceptance` block, again as context
+that is not bound: `captured_at` (the capturing machine's own UTC clock),
+`captured_by_account` / `captured_by_uid` (the POSIX account that process
+ran as), and `capture_mode` (`interactive-tty` when that process had a
+terminal on standard input and standard output, `no-tty` otherwise). Read
+those names literally. **A receipt does not identify a person, is not
+signed, and its timestamp is attested by nothing.** What the block adds is
+that a receipt now says when, as whom and at what kind of console it was
+minted, so a receipt produced by a build or an image is distinguishable
+from one minted at a console - by inspection, and by
+`require(..., captured_at_a_terminal=True)`, which is off by default and
+whose use anywhere in the stack is an owner decision. Receipts written
+before LIC6 carry no block, read exactly as before, and cover exactly as
+before; they are refused only by a caller that has opted in. Receipts
+written from LIC6 on are **refused by pre-LIC6 readers**, which reject an
+unknown context key - a fail-closed break, so every consumer pinning this
+authority must re-pin before anything writes a LIC6 receipt.
 
 This `0.1.0` LIC2 state generates licence records from the checked
 determinations JSON (never retyped). The repository licence file is MIT

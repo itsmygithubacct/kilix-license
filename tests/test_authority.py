@@ -7,7 +7,12 @@ import sys
 import tempfile
 import unittest
 
-from kilix_license.agreement import Agreement, capture_agreement, typed_agreement_line
+from kilix_license.agreement import (
+    Agreement,
+    capture_agreement,
+    observe_capture,
+    typed_agreement_line,
+)
 from kilix_license.coverage import covers
 from kilix_license.errors import (
     AgreementRequired,
@@ -123,10 +128,12 @@ class AuthorityTests(unittest.TestCase):
                 "context",
             },
         )
-        # LIC4 adds three context keys (recorded, not bound); fbdfb546 wrote three.
+        # LIC4 adds three context keys (recorded, not bound); fbdfb546 wrote
+        # three. LIC6 adds `acceptance` (V-ACC-VERIFY F6), also recorded.
         self.assertEqual(
             set(payload["context"]),
             {
+                "acceptance",
                 "advisory_digests",
                 "release_digest",
                 "catalogue_digest",
@@ -134,6 +141,10 @@ class AuthorityTests(unittest.TestCase):
                 "component_exception_digests",
                 "statement_digests",
             },
+        )
+        self.assertEqual(
+            set(payload["context"]["acceptance"]),
+            {"capture_mode", "captured_at", "captured_by_account", "captured_by_uid"},
         )
         self.assertEqual(payload["decision"], "accept")
         self.assertEqual(payload["licensor"], "Kyutai")
@@ -275,6 +286,44 @@ class AuthorityTests(unittest.TestCase):
                 release_digest=FIXTURE_RELEASE,
                 catalogue_digest=FIXTURE_CATALOGUE,
             )
+
+    def test_a_receipt_cannot_be_minted_without_recording_its_capture(self) -> None:
+        # V-ACC-VERIFY F6. Recording the capture only closes anything if it
+        # cannot be skipped: a producer that built the Agreement by hand would
+        # otherwise mint exactly the anonymous, timeless receipt the finding is
+        # about. The refusal names the way to do it right.
+        good = capture_agreement(
+            self.fixtures.pocket, typed_agreement_line(self.fixtures.pocket)
+        )
+        self.assertIsNotNone(good.acceptance)
+        stripped = replace(good, acceptance=None)
+        with self.assertRaises(AgreementRequired) as caught:
+            receipt_from_agreement(
+                self.fixtures.pocket,
+                stripped,
+                manifest_digest=FIXTURE_MANIFEST,
+                release_digest=FIXTURE_RELEASE,
+                catalogue_digest=FIXTURE_CATALOGUE,
+            )
+        self.assertIn("capture_agreement", str(caught.exception))
+        # A producer that captured the agreement elsewhere passes its own.
+        elsewhere = replace(good, acceptance=observe_capture(interactive=True))
+        receipt = receipt_from_agreement(
+            self.fixtures.pocket,
+            elsewhere,
+            manifest_digest=FIXTURE_MANIFEST,
+            release_digest=FIXTURE_RELEASE,
+            catalogue_digest=FIXTURE_CATALOGUE,
+        )
+        self.assertTrue(receipt.acceptance.was_captured_at_a_terminal)
+        self.assertEqual(receipt.acceptance.captured_by_uid, os.getuid())
+        # and it survives a write/read round trip through the store.
+        path = self.store.write(receipt)
+        from kilix_license.receipts import parse_receipt_bytes
+
+        self.assertEqual(
+            parse_receipt_bytes(path.read_bytes()).acceptance, receipt.acceptance
+        )
 
     def test_receipt_from_agreement_requires_named_binding_ids(self) -> None:
         agreement = capture_agreement(

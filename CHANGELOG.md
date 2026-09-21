@@ -4,6 +4,39 @@ All notable changes to `kilix-license` are recorded here.
 
 ## Unreleased
 
+- There is one receipt store root and this authority names it:
+  `receipt_store_root()` is `$GPU_TERMINAL_HOME/license-receipts`,
+  overridden by `$KILIX_LICENSE_RECEIPTS`, and `ReceiptStore.shared()`
+  opens it without a caller naming a path. A caller that does name one and
+  gets it wrong is refused at that point, with both paths in the message,
+  instead of producing a gate that refuses an acceptance the user gave.
+  A writer process and a reader process, each naming no path, are checked
+  against each other in the suite, with the diverging arm as a control.
+- A receipt records an `acceptance` block as context that is not bound
+  (OD-AQ): `captured_at`, `captured_by_account`, `captured_by_uid` and
+  `capture_mode` (`interactive-tty` or `no-tty`), all observed by this
+  authority when the agreement is captured. It identifies no person, is
+  not signed and attests no clock. `require(..., captured_at_a_terminal=
+  True)` lets a caller demand the weakest form of it; the default is
+  unchanged and every earlier receipt still covers exactly as before.
+  Receipts written from here on are refused by readers older than this
+  change, which reject an unknown context key: re-pin consumers first.
+- No line an advisory note wrote itself may state a licence. The note's
+  preamble and each block's attribution header were checked by nothing, so
+  a fabricated "relicensed to Apache-2.0; commercial use is permitted"
+  could ship on the accept screen with the suite green while every quoted
+  line was still verbatim. The generator now refuses a note whose authored
+  lines carry a licence identifier or the language of permission, and the
+  suite proves the detector is live against the upstream wording itself.
+- The audiocraft block's attribution header says why an adjacent
+  repository is on an EnCodec screen and that "this repository" in the
+  lines below is audiocraft. The note moves; both EnCodec record **files**
+  move with it; no record digest moves.
+- Each declared note source carries the evidence packet's own record of it,
+  vendored under `tests/data/note-sources/packet-records/`, as a second
+  witness for the declared digest and for every quoted line the packet
+  records. `tools/verify_note_sources.py --packets DIR` re-derives both
+  from the packets when they are to hand.
 - The EnCodec first-use screen shows the licence-history note itself
   instead of OD-AR's builder-facing sentence describing it. The note is a
   vendored text under `data/texts/`, quoting the 2022 CC BY-NC and 2023

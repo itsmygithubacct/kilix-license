@@ -1,0 +1,21 @@
+{
+  "lines": {
+    "13": "== 3. LICENSE and README licence section at selected commits",
+    "14": "  3837f0db 2022-10-25T09:54:25Z LICENSE 19333 B sha256 a7950c0fed88e9a1… first line 'Attribution-NonCommercial 4.0 International'; README:135 'This repository is released under the CC-BY-NC 4.0. license as found in the [LICENSE](LICENSE) file.'",
+    "15": "  59dd2a56 2022-10-25T10:26:52Z LICENSE 19333 B sha256 a7950c0fed88e9a1… first line 'Attribution-NonCommercial 4.0 International'; README:150 'This repository is released under the CC-BY-NC 4.0. license as found in the [LICENSE](LICENSE) file.'",
+    "16": "  f1479a65 2022-10-25T16:12:57Z LICENSE 19333 B sha256 a7950c0fed88e9a1… first line 'Attribution-NonCommercial 4.0 International'; README:163 'This repository is released under the CC-BY-NC 4.0. license as found in the [LICENSE](LICENSE) file.'",
+    "17": "  2a5c2f78 2023-03-22T14:15:14Z LICENSE 19333 B sha256 a7950c0fed88e9a1… first line 'Attribution-NonCommercial 4.0 International'; README:184 'This repository is released under the CC-BY-NC 4.0. license as found in the [LICENSE](LICENSE) file.'",
+    "18": "  349b7293 2023-04-26T12:17:48Z LICENSE 1087 B sha256 cf9b17822d1fcd4f… first line 'MIT License'; README:184 'The code in this repository is released under the MIT license as found in the [LICENSE](LICENSE) file.'",
+    "19": "  2d29d935 2023-04-26T12:19:04Z LICENSE 1087 B sha256 cf9b17822d1fcd4f… first line 'MIT License'; README:184 'The code in this repository is released under the MIT license as found in the [LICENSE](LICENSE) file.'",
+    "20": "  0e2d0aed 2023-06-20T15:15:57Z LICENSE 1087 B sha256 cf9b17822d1fcd4f… first line 'MIT License'; README:230 'The code in this repository is released under the MIT license as found in the [LICENSE](LICENSE) file.'"
+  },
+  "path": "licence-evidence-encodec-2026-09-15/sources/upstream-licence-history.txt",
+  "sha256": "1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90",
+  "vendored_from": {
+    "file": "sources/quotes.json",
+    "key": "quotes.PACKET_HISTORY",
+    "packet": "licence-evidence-encodec-errata-2026-09-17",
+    "path_rewritten": "the packet records an absolute path on the machine that built it; everything before licence-evidence-encodec-2026-09-15/ is dropped here and nothing else is changed",
+    "sha256": "15d17ef65ae566134fe3fa238817211192019fb066717db675192a0a545a5dca"
+  }
+}

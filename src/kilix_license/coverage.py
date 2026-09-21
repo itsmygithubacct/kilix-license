@@ -64,8 +64,24 @@ def require(
     *,
     records: RecordIndex,
     store: ReceiptStore,
+    captured_at_a_terminal: bool = False,
 ) -> Receipt:
-    """Return the covering receipt for asset, scoped to the binding."""
+    """Return the covering receipt for asset, scoped to the binding.
+
+    ``captured_at_a_terminal`` is off by default and changes nothing when it
+    is: coverage is the OD-AI binding and nothing else, so every receipt any
+    earlier kilix-license wrote is accepted exactly as before.
+
+    Switched on, it additionally demands that the receipt record a capture at
+    a terminal (V-ACC-VERIFY F6's ``acceptance.capture_mode``). That refuses a
+    receipt written with no console -- a build step, an image, a provisioning
+    script -- and refuses every receipt written before LIC6, which record no
+    capture at all. It is not proof a person accepted anything (see
+    :class:`kilix_license.agreement.Acceptance`); it is the weakest mechanical
+    check that distinguishes a receipt minted at a console from one that was
+    shipped, and turning it on anywhere in the stack is an owner decision, not
+    a default this authority may impose.
+    """
     record = records.by_digest(asset.record_digest)
     receipt = store.lookup(asset.record_digest, asset.manifest_digest)
     if receipt is None:
@@ -78,6 +94,19 @@ def require(
         raise CoverageRefused("manifest_digest")
     if receipt.record_digest != asset.record_digest:
         raise CoverageRefused("record_digest")
+    if captured_at_a_terminal and not (
+        receipt.acceptance is not None
+        and receipt.acceptance.was_captured_at_a_terminal
+    ):
+        raise CoverageRefused(
+            "acceptance.capture_mode",
+            "this caller demands a receipt captured at a terminal; this one "
+            + (
+                "records no capture at all (it predates LIC6)"
+                if receipt.acceptance is None
+                else f"records capture_mode {receipt.acceptance.capture_mode!r}"
+            ),
+        )
     return receipt
 
 
