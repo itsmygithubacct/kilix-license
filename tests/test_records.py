@@ -7,6 +7,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,7 @@ from kilix_license.errors import (
     TextDigestMismatch,
 )
 from kilix_license.generate import (
+    ADVISORY_TEXT_SOURCES,
     ADVISORY_TEXTS,
     BINDING_TEXT_IDS,
     CONVERTER_ID,
@@ -30,6 +32,7 @@ from kilix_license.generate import (
     FORBIDDEN_PREFIXES,
     PDF_ENGINE_RECORD_IDS,
     REQUIRED_RECORD_IDS,
+    check_advisory_note_sources,
     check_advisory_texts,
     check_binding_text_ids,
     check_licence_text_ids,
@@ -42,6 +45,7 @@ from kilix_license.generate import (
     licensors_of,
     load_determinations,
     load_pin,
+    parse_quoted_blocks,
     quote_blobs,
     record_filename,
     record_from_entry,
@@ -69,6 +73,28 @@ def tracked_files() -> set[str]:
     if result.returncode != 0:
         return set()
     return {line for line in result.stdout.splitlines() if line}
+
+
+def _numbered_sections(text: str) -> dict[int, dict[int, str]]:
+    """Split a "== N. title" report into {section number: {line number: line}}.
+
+    The pinned note source is such a report. Reading its structure back out of
+    the file is what lets the suite derive which lines the note should quote
+    instead of repeating the answer (LIC5-VERIFY F1, mutant V6).
+    """
+    sections: dict[int, dict[int, str]] = {}
+    current: dict[int, str] | None = None
+    header = re.compile(r"^== (\d+)\. ")
+    for number, line in enumerate(text.split("\n"), start=1):
+        found = header.match(line)
+        if found is not None:
+            current = {number: line}
+            sections[int(found.group(1))] = current
+        elif line == "":
+            current = None
+        elif current is not None:
+            current[number] = line
+    return sections
 
 
 def _tree_digest(root: Path) -> str:
@@ -671,14 +697,14 @@ class LicenceTextIdentityTests(unittest.TestCase):
 class AdvisoryNoteTests(unittest.TestCase):
     """LIC5 (C4-VERIFY F2, R4-068): the EnCodec screen shows the note, not its spec."""
 
-    # The two sources the committed note quotes, as the note itself names them.
-    # These are file digests, not licence statements: nothing here is retyped.
-    HISTORY_SHA256 = "1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90"
-    OWNER_DECISIONS_SHA256 = (
-        "aa5ddb6947732d1ae6d9f9431df136202636cf412d0ff1dbfa523531856ede90"
-    )
+    # No source file, digest or line number is named here: LIC5-VERIFY F3. The
+    # note's sources are ADVISORY_TEXT_SOURCES, the note's own headers are read
+    # back out of the note, and the source files themselves are pinned under
+    # tests/data/note-sources/<sha256>. Adding or dropping a quoted block is a
+    # change to that one table, and these tests follow it.
     ENCODEC_IDS = ("encodec-24khz-stateful", "encodec-48khz-frame")
     ADVISORY_ID = "encodec-licence-history-note"
+    SOURCES = ROOT / "tests" / "data" / "note-sources"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -738,15 +764,159 @@ class AdvisoryNoteTests(unittest.TestCase):
                 self.assertIn(header + note, screen)
                 self.assertNotIn(spec, screen)
 
-    def test_the_note_names_both_sources_it_quotes(self) -> None:
+    def test_the_note_names_the_sources_it_quotes(self) -> None:
+        # LIC5-VERIFY F3: driven by ADVISORY_TEXT_SOURCES, so a block added to
+        # or dropped from the note needs no edit here.
+        declared = ADVISORY_TEXT_SOURCES[self.note_digest]
         note = (self.texts_dir / self.note_digest).read_text(encoding="utf-8")
         headers = [
             line for line in note.splitlines() if line.startswith("quoted from ")
         ]
-        self.assertEqual(len(headers), 2, headers)
-        self.assertIn(self.HISTORY_SHA256, note)
-        self.assertIn(self.OWNER_DECISIONS_SHA256, note)
+        self.assertEqual(len(headers), len(declared), headers)
+        for source in declared:
+            with self.subTest(source=source.path, lines=source.lines):
+                self.assertIn(f"quoted from {source.path}", note)
+                self.assertIn(source.sha256, note)
         self.assertTrue(note.endswith("\n"))
+
+    def test_every_quoted_line_is_still_its_named_sources_bytes(self) -> None:
+        # LIC5-VERIFY F1 (Major). The note's first two lines promise the user
+        # that every line under a "quoted from" header is the named source's
+        # bytes. Nothing enforced that: one byte of the quoted CC BY-NC
+        # sentence could be changed, made self-consistent, and the suite stayed
+        # green. Re-derive each quoted block from the pinned source file and
+        # compare bytes, using the line numbers the note's OWN header claims,
+        # so a header that claims one slice while quoting another fails too.
+        note = (self.texts_dir / self.note_digest).read_bytes()
+        blocks = parse_quoted_blocks(note)
+        declared = ADVISORY_TEXT_SOURCES[self.note_digest]
+        self.assertEqual(len(blocks), len(declared))
+        for (claimed, quoted), source in zip(blocks, declared):
+            with self.subTest(source=claimed.path, lines=claimed.lines):
+                # What the header claims is what the note is checked against.
+                self.assertEqual(claimed, source)
+                pinned = self.SOURCES / claimed.sha256
+                self.assertTrue(pinned.is_file(), claimed.sha256)
+                data = pinned.read_bytes()
+                self.assertEqual(hashlib.sha256(data).hexdigest(), claimed.sha256)
+                lines = data.split(b"\n")
+                expected = b"".join(lines[n - 1] + b"\n" for n in claimed.lines)
+                self.assertEqual(quoted, expected)
+
+    def test_each_quoted_slice_is_one_the_source_itself_justifies(self) -> None:
+        # LIC5-VERIFY F1, mutant V6: a slice shifted by one and declared
+        # honestly quotes real source lines, so comparing bytes is not enough.
+        # A note may take a whole section of its source, header line included,
+        # or the two lines at which the recorded licence changed -- never an
+        # arbitrary window. Both are derived from the pinned source here; no
+        # line number is typed, so dropping or adding a block needs no edit.
+        licence_of = re.compile(r"LICENSE \d+ B sha256 (\S+)")
+        for source in ADVISORY_TEXT_SOURCES[self.note_digest]:
+            with self.subTest(source=source.path, lines=source.lines):
+                text = (self.SOURCES / source.sha256).read_text(encoding="utf-8")
+                sections = _numbered_sections(text)
+                self.assertTrue(sections, source.path)
+                allowed = {tuple(sorted(body)) for body in sections.values()}
+                for body in sections.values():
+                    states = {
+                        number: line
+                        for number, line in body.items()
+                        if licence_of.search(line) is not None
+                    }
+                    if len(states) < 2:
+                        continue
+                    first = min(states)
+                    started = licence_of.search(states[first]).group(1)
+                    changed = [
+                        number
+                        for number in sorted(states)
+                        if number > first
+                        and licence_of.search(states[number]).group(1) != started
+                    ]
+                    if changed:
+                        allowed.add((first, changed[0]))
+                self.assertIn(source.lines, allowed)
+
+    def test_a_note_whose_header_disagrees_with_its_sources_is_refused(self) -> None:
+        # The guard behind F1, on the generator side: the same shifted-slice
+        # and misdeclared-header shapes, planted, must not generate.
+        note = (self.texts_dir / self.note_digest).read_bytes()
+        check_advisory_note_sources(self.note_digest, note)
+        blocks = parse_quoted_blocks(note)
+        first = blocks[0][0]
+        shifted = dict(ADVISORY_TEXT_SOURCES)
+        shifted[self.note_digest] = (
+            replace(first, lines=tuple(n + 1 for n in first.lines)),
+        ) + tuple(source for source, _ in blocks[1:])
+        with self.assertRaises(ValueError) as caught:
+            check_advisory_note_sources(self.note_digest, note, shifted)
+        self.assertIn("ADVISORY_TEXT_SOURCES declares", str(caught.exception))
+        with self.assertRaises(ValueError):
+            check_advisory_note_sources("f" * 64, note)
+        truncated = note[: note.index(b"\nquoted from ")]
+        with self.assertRaises(ValueError):
+            parse_quoted_blocks(truncated)
+
+    def test_the_generator_refuses_a_note_whose_header_moved(self) -> None:
+        # The same guard, reached the way a record is generated: a seat that
+        # edits a note's header without editing ADVISORY_TEXT_SOURCES gets a
+        # refusal that names the table, not a green suite (LIC5-VERIFY F1).
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-license-lic5-header-"))
+        dest = scratch / "data"
+        shutil.copytree(DATA, dest)
+        texts = dest / "texts"
+        first = parse_quoted_blocks((texts / self.note_digest).read_bytes())[0][0]
+        claimed = f", lines {first.lines[0]} and {first.lines[-1]}\n".encode("utf-8")
+        note = (texts / self.note_digest).read_bytes()
+        self.assertEqual(note.count(claimed), 1)
+        moved = note.replace(
+            claimed,
+            f", lines {first.lines[0] + 1} and {first.lines[-1] + 1}\n".encode("utf-8"),
+        )
+        digest = hashlib.sha256(moved).hexdigest()
+        (texts / digest).write_bytes(moved)
+        with mock.patch.dict(
+            "kilix_license.generate.ADVISORY_TEXTS", {self.ADVISORY_ID: digest}
+        ), mock.patch.dict(
+            "kilix_license.generate.ADVISORY_TEXT_SOURCES",
+            {digest: ADVISORY_TEXT_SOURCES[self.note_digest]},
+        ):
+            with self.assertRaises(ValueError) as caught:
+                generate_records(self.payload, pin=self.pin, texts_dir=texts)
+        self.assertIn("ADVISORY_TEXT_SOURCES declares", str(caught.exception))
+
+    def test_the_elided_48khz_pin_resolves_in_the_pinned_source(self) -> None:
+        # LIC5-VERIFY F7: the displayed statement shows `47a15ffb…` and the full
+        # 48 kHz model.safetensors digest is pinned nowhere in this repository,
+        # so a consumer checking E2 against it cannot. It is on line 75 of the
+        # source the note already quotes, which is now pinned here: the elision
+        # resolves to exactly one full digest in that file.
+        entry = self.entries[self.ENCODEC_IDS[0]]
+        shown = entry["attribution"][0]
+        self.assertEqual(shown["quote_id"], "encodec-e1-e2-pins")
+        source = ADVISORY_TEXT_SOURCES[self.note_digest][0]
+        data = (self.SOURCES / source.sha256).read_text(encoding="utf-8")
+
+        # E1 is elided at both ends and is pinned in determinations.json.
+        e1 = re.search(r"`([0-9a-f]{8})…([0-9a-f]{4})`", shown["text"])
+        self.assertIsNotNone(e1, shown["text"])
+        pinned = [
+            item["sha256"]
+            for item in entry["upstream"]["files"]
+            if item["sha256"].startswith(e1.group(1))
+            and item["sha256"].endswith(e1.group(2))
+        ]
+        self.assertEqual(len(pinned), 1, pinned)
+
+        # E2 is elided at one end and was pinned nowhere in this repository.
+        e2 = re.search(r"`([0-9a-f]{8})…`", shown["text"])
+        self.assertIsNotNone(e2, shown["text"])
+        full = sorted(set(re.findall(rf"\b{e2.group(1)}[0-9a-f]{{56}}\b", data)))
+        self.assertEqual(len(full), 1, full)
+        self.assertIn(
+            f"encodec_48khz model.safetensors 76291152 lfs_sha256 {full[0]}", data
+        )
+        self.assertNotIn(full[0], self.data.decode("utf-8"))
 
     def test_the_note_is_outside_the_record_digest(self) -> None:
         # OD-AI/OD-AQ: an advisory is context. Replacing it moves no record

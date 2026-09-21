@@ -44,11 +44,23 @@ spans. One is not: the EnCodec `encodec-licence-history-note` advisory. The
 determinations quote there is OD-AR's builder-facing description of the
 screen, so `ADVISORY_TEXTS` binds the note itself instead - a text vendored
 under `data/texts/` whose quoted lines are copied byte for byte from the
-L-ENC-R2 evidence packet, with the file, lines and digests recorded beside
-the table. The generator refuses a table entry no determinations quote uses,
-an entry that is not a sha256, and a note that is missing or does not match
-its digest. An advisory is not bound (OD-AQ), so the EnCodec record digests
-and every receipt's coverage are unchanged by it.
+upstream licence history the L-ENC-R2 evidence packet pins. The generator
+refuses a table entry no determinations quote uses, an entry that is not a
+sha256, and a note that is missing or does not match its digest. An advisory
+is not bound (OD-AQ), so the EnCodec record digests and every receipt's
+coverage are unchanged by it.
+
+The note tells the user that every line under a "quoted from" header is its
+named source's bytes, so that promise is checked rather than asserted.
+`ADVISORY_TEXT_SOURCES` declares, for each note, which file it quotes, that
+file's sha256 and the exact lines taken; `parse_quoted_blocks` reads the
+same three facts back out of the note's own headers, and the generator
+refuses a note whose headers disagree with the declaration, including a
+header that names one slice while quoting another. Each named source file is
+pinned under `tests/data/note-sources/<sha256>`, and the suite re-derives
+every quoted line from it and compares bytes, using the line numbers the
+note itself claims. Adding or dropping a quoted block is a change to that
+one table: nothing else names the note's sources.
 
 Receipts written from LIC4 on also record, as context that is not bound
 (OD-AQ), the statement and component-exception digests shown on the screen
@@ -79,4 +91,7 @@ make check
 ```
 
 `make check` syncs the frozen environment, runs the test suite, and
-builds installable artifacts.
+builds installable artifacts. Inside a network sandbox run it as
+`make check OFFLINE=1`: `uv build` otherwise resolves the PEP 517 build
+backend over the network, which uv.lock does not pin, and the gate fails
+with a name-resolution error rather than a defect.

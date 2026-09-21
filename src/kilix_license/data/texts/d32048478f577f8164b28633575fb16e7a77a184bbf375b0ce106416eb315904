@@ -1,6 +1,6 @@
 EnCodec licence history. Every line below a "quoted from" header is copied
 byte for byte from the source that header names; nothing here is retyped.
-Both sources are pinned by licence-evidence-encodec-errata-2026-09-17
+The source file is pinned by licence-evidence-encodec-errata-2026-09-17
 (L-ENC-R2) sources/quotes.json, sha256 15d17ef65ae566134fe3fa238817211192019fb066717db675192a0a545a5dca.
 
 quoted from licence-evidence-encodec-2026-09-15/sources/upstream-licence-history.txt
@@ -10,10 +10,11 @@ sha256 1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90, lines 1
   3837f0db 2022-10-25T09:54:25Z LICENSE 19333 B sha256 a7950c0fed88e9a1… first line 'Attribution-NonCommercial 4.0 International'; README:135 'This repository is released under the CC-BY-NC 4.0. license as found in the [LICENSE](LICENSE) file.'
   349b7293 2023-04-26T12:17:48Z LICENSE 1087 B sha256 cf9b17822d1fcd4f… first line 'MIT License'; README:184 'The code in this repository is released under the MIT license as found in the [LICENSE](LICENSE) file.'
 
-quoted from 0.2.2-astra-coordination/OWNER-DECISIONS-2026-09-12.md
-sha256 aa5ddb6947732d1ae6d9f9431df136202636cf412d0ff1dbfa523531856ede90, lines 738 to 740
-(owner determination OD-AR):
+quoted from licence-evidence-encodec-2026-09-15/sources/upstream-licence-history.txt
+sha256 1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90, lines 91 to 94
+(section 9 of that file: the adjacent facebookresearch/audiocraft repository):
 
-Meta published both checkpoints in Oct 2022 under a CC BY-NC 4.0 repository. It relicensed "the code" to MIT
-in Apr 2023 (349b7293) and never stated a licence for the weights. The HF 48 kHz `license: mit` tag is a
-third-party card edit. Owner's answer: **"CC BY-NC 4.0, binding (Recommended)"**.
+== 9. facebookresearch/audiocraft (adjacent)
+  main 896ec7c47f5e5d1e5aa1e4b260c4405328bf009d | LICENSE_weights commits [('5e3ae32f', '2023-08-02T13:34:38Z'), ('5238467a', '2023-06-09T05:35:16Z')]
+  README.md: * The code in this repository is released under the MIT license as found in the [LICENSE file](LICENSE).
+  README.md: * The models weights in this repository are released under the CC-BY-NC 4.0 license as found in the [LICENSE_weights file](LICENSE_weights).

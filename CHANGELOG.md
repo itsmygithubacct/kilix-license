@@ -7,12 +7,26 @@ All notable changes to `kilix-license` are recorded here.
 - The EnCodec first-use screen shows the licence-history note itself
   instead of OD-AR's builder-facing sentence describing it. The note is a
   vendored text under `data/texts/`, quoting the 2022 CC BY-NC and 2023
-  MIT README statements and OD-AR's own record that no licence for the
-  weights was ever stated, byte for byte from the L-ENC-R2 evidence
-  packet. `ADVISORY_TEXTS` binds it to both EnCodec records; a stale or
-  malformed entry, and a missing or altered note, are refused. Advisories
-  stay outside the record digest (OD-AQ), so both EnCodec record digests
-  and every receipt's coverage are unchanged.
+  MIT README statements and, as the adjacent repository that does state a
+  licence for model weights separately, audiocraft's two README lines -
+  byte for byte from the upstream licence history the L-ENC-R2 evidence
+  packet pins. `ADVISORY_TEXTS` binds it to both EnCodec records; a stale
+  or malformed entry, and a missing or altered note, are refused.
+  Advisories stay outside the record digest (OD-AQ), so both EnCodec
+  record digests and every receipt's coverage are unchanged.
+- An advisory note's "quoted from" headers are now checked against what it
+  is declared to quote. `ADVISORY_TEXT_SOURCES` is the one declaration of
+  each note's sources, digests and line numbers; the generator parses the
+  note's own headers and refuses a disagreement, and the suite re-derives
+  every quoted line from the source file pinned under
+  `tests/data/note-sources/` and compares bytes. A quoted licence sentence
+  that drifts from its source, or a header that claims a slice it does not
+  quote, now fails.
+- `make check OFFLINE=1` names, in the tree, what a sandboxed gate
+  needs: `uv build` resolves the PEP 517 build backend over the network
+  and uv.lock does not pin it, so without the flag a gate run with no
+  network fails on name resolution rather than on a defect. The default
+  is unchanged.
 - Licence texts carry a generated document identity, `licence_text_id`,
   outside the record digest (every record digest is unchanged), so a
   licence text revised through a sibling record is marked changed. Receipts

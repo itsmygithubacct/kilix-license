@@ -3,6 +3,18 @@
 UV ?= uv
 PYTHON_VERSION ?= 3.12.8
 DIST ?= dist
+
+# `uv build` resolves the PEP 517 build backend (setuptools>=77 in
+# pyproject.toml), which uv.lock does not pin, so `build` reaches the network
+# on a cold cache. Under a network sandbox (`unshare -cn`) that fetch fails and
+# the gate reports "failed to lookup address information" -- a red gate that
+# looks like a defect and is not one. Run a sandboxed gate as
+# `make check OFFLINE=1`, with the backend already in $(UV_CACHE_DIR).
+# The default is unchanged: a cold checkout can still fetch and build.
+OFFLINE ?=
+ifeq ($(OFFLINE),1)
+export UV_OFFLINE := 1
+endif
 NSS_HOME := $(shell python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')
 export UV_PYTHON_INSTALL_DIR ?= $(NSS_HOME)/.local/share/uv/python
 export UV_CACHE_DIR ?= $(NSS_HOME)/.cache/uv

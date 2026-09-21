@@ -9,6 +9,7 @@ from cited source spans. A hand-edited committed record fails --check.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import re
@@ -163,6 +164,15 @@ LICENCE_TEXT_IDS = {
     # "facebookresearch/encodec MIT LICENSE" (OD-AS code relicensing notice).
     CONVERTER_ID: "github.com/facebookresearch/encodec/LICENSE",
 }
+@dataclass(frozen=True)
+class QuotedSource:
+    """One "quoted from" block of an advisory note: file, digest, lines taken."""
+
+    path: str
+    sha256: str
+    lines: tuple[int, ...]
+
+
 # LIC5 (C4-VERIFY F2, R4-068): the advisory the determinations quote for the two
 # EnCodec records is OD-AR's builder-facing *specification* of the screen. It
 # promises "a short verbatim-sourced licence-history note" and stands exactly
@@ -179,21 +189,60 @@ LICENCE_TEXT_IDS = {
 #
 # Not bound (OD-AI, OD-AQ): an advisory digest is outside the record digest, so
 # this changes no receipt's coverage. It is recorded as receipt context.
-#
-# d62a39c2… is built from, with the lines it takes:
-#   licence-evidence-encodec-2026-09-15/sources/upstream-licence-history.txt
-#     sha256 1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90,
-#     lines 14 and 18 (L-ENC-R2 sources/quotes.json key PACKET_HISTORY): the
-#     2022 CC BY-NC and 2023 MIT README statements, as the READMEs state them.
-#   0.2.2-astra-coordination/OWNER-DECISIONS-2026-09-12.md
-#     sha256 aa5ddb6947732d1ae6d9f9431df136202636cf412d0ff1dbfa523531856ede90,
-#     lines 738 to 740 (L-ENC-R2 sources/quotes.json key OWNER_DECISIONS_OD_AR):
-#     OD-AR's own record that Meta never stated a licence for the weights.
 ADVISORY_TEXTS = {
     "encodec-licence-history-note": (
-        "d62a39c2099d4a2ba224546b5ea1a34af14aefa9fb2d91418ddc18eeb3f0c391"
+        "d32048478f577f8164b28633575fb16e7a77a184bbf375b0ce106416eb315904"
     ),
 }
+# LIC5-FIX (LIC5-VERIFY F1, F2, F3, F5): what each replacement note quotes, as
+# data rather than as prose in a comment and a literal in a test.
+#
+# F1: the note tells the user every line under a "quoted from" header is copied
+# byte for byte from the source that header names. Nothing enforced that. The
+# note's own headers are now parsed (parse_quoted_blocks) and must equal this
+# table, so a note whose header claims one slice while quoting another is
+# refused here; and tests/data/note-sources/<sha256> holds each source file, so
+# the suite re-derives every quoted line from the named source and compares
+# bytes. A corrupted licence sentence no longer ships green.
+#
+# F3: one table. A block added to or dropped from a note is a change here and
+# nowhere else -- the note's sources and the tests that check them cannot
+# disagree, because the tests read this.
+#
+# F2/F5: the second block was OWNER-DECISIONS-2026-09-12.md lines 738-740, the
+# owner's internal decision text, rendered on a user-facing screen with markdown
+# bold, "Owner's answer:" and backticked field names -- the pattern C4-VERIFY F4
+# named -- and citing a digest that matches no file on disk. It is replaced by
+# section 9 of the file the note already quoted: facebookresearch/audiocraft,
+# where upstream states a licence for model weights separately from the licence
+# for code, next to encodec's own statements about "this repository" and "the
+# code". Every digest the note cites now resolves to a file that exists.
+ADVISORY_TEXT_SOURCES = {
+    "d32048478f577f8164b28633575fb16e7a77a184bbf375b0ce106416eb315904": (
+        # The 2022 CC BY-NC state and the 2023 MIT relicensing, as the upstream
+        # READMEs state them (L-ENC-R2 sources/quotes.json key PACKET_HISTORY
+        # records this path and this digest, and lines 14 and 18 themselves).
+        QuotedSource(
+            path=(
+                "licence-evidence-encodec-2026-09-15/sources/"
+                "upstream-licence-history.txt"
+            ),
+            sha256="1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90",
+            lines=(14, 18),
+        ),
+        # Section 9 of the same file: facebookresearch/audiocraft.
+        QuotedSource(
+            path=(
+                "licence-evidence-encodec-2026-09-15/sources/"
+                "upstream-licence-history.txt"
+            ),
+            sha256="1ce36c87223cc7a1cdd052a876440abd48e11604ffc0037a2b4afadef6da1e90",
+            lines=(91, 92, 93, 94),
+        ),
+    ),
+}
+_QUOTED_FROM = "quoted from "
+_QUOTED_SHA = re.compile(r"^sha256 ([0-9a-f]{64}), lines? (.+)$")
 _NON_ID = re.compile(r"[^a-z0-9._:-]+")
 _QUOTE_KEYS = (
     "binding_conditions",
@@ -409,7 +458,8 @@ def _quotes_as(
                         f"{label}[{index}] advisory {quote_id!r} has a replacement "
                         "text but no texts_dir to verify it against"
                     )
-                load_text_file(texts_dir, replacement, f"advisory:{item_id}")
+                note = load_text_file(texts_dir, replacement, f"advisory:{item_id}")
+                check_advisory_note_sources(replacement, note)
                 digest = replacement
             items.append(Advisory(id=item_id, text_sha256=digest))
         else:
@@ -625,6 +675,113 @@ def check_licence_text_ids(
         raise ValueError(f"licence text identities also name binding texts: {shared}")
 
 
+def _quoted_line_numbers(spec: str, label: str) -> tuple[int, ...]:
+    """Expand a header's line spec: "14 and 18", "91 to 94", or "75"."""
+    for separator, contiguous in ((" and ", False), (" to ", True)):
+        if separator in spec:
+            parts = spec.split(separator)
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                raise ValueError(f"{label} has an unreadable line spec: {spec!r}")
+            first, last = (int(p) for p in parts)
+            if first < 1 or last <= first:
+                raise ValueError(f"{label} has an unreadable line spec: {spec!r}")
+            return tuple(range(first, last + 1)) if contiguous else (first, last)
+    if spec.isdigit() and int(spec) >= 1:
+        return (int(spec),)
+    raise ValueError(f"{label} has an unreadable line spec: {spec!r}")
+
+
+def parse_quoted_blocks(data: bytes, label: str = "advisory note") -> tuple[
+    tuple[QuotedSource, bytes], ...
+]:
+    """Read an advisory note's "quoted from" blocks: what it claims, and what it quotes.
+
+    LIC5-VERIFY F1. The note promises the user that every line under such a
+    header is its named source's bytes. That promise is only checkable if the
+    headers are machine-readable, so the shape is fixed here:
+
+        quoted from <path>
+        sha256 <64 hex>, lines <spec>
+        (<what the source is>):
+        <blank>
+        <one or more quoted lines>
+
+    and blocks are separated by one blank line. Returns each header as a
+    QuotedSource with the block's quoted bytes, so a caller with the source
+    file can compare them line for line.
+    """
+    text = data.decode("utf-8")
+    lines = text.split("\n")
+    if not lines or lines[-1] != "":
+        raise ValueError(f"{label} must end with a newline")
+    lines.pop()
+    starts = [i for i, line in enumerate(lines) if line.startswith(_QUOTED_FROM)]
+    if not starts:
+        raise ValueError(f"{label} has no {_QUOTED_FROM.strip()!r} header")
+    blocks: list[tuple[QuotedSource, bytes]] = []
+    for position, start in enumerate(starts):
+        where = f"{label} block {position + 1}"
+        if start + 4 > len(lines):
+            raise ValueError(f"{where} is truncated")
+        path = lines[start][len(_QUOTED_FROM) :]
+        if not path:
+            raise ValueError(f"{where} names no source file")
+        matched = _QUOTED_SHA.match(lines[start + 1])
+        if matched is None:
+            raise ValueError(f"{where} has no 'sha256 <digest>, lines ...' line")
+        if not lines[start + 2].endswith("):"):
+            raise ValueError(f"{where} has no '(...):' line")
+        if lines[start + 3] != "":
+            raise ValueError(f"{where} has no blank line before its quoted lines")
+        if position + 1 < len(starts):
+            stop = starts[position + 1] - 1
+            if stop <= start + 3 or lines[stop] != "":
+                raise ValueError(f"{where} is not separated from the next by a blank line")
+        else:
+            stop = len(lines)
+        quoted = lines[start + 4 : stop]
+        if not quoted or any(line == "" for line in quoted):
+            raise ValueError(f"{where} quotes no lines, or quotes a blank line")
+        blocks.append(
+            (
+                QuotedSource(
+                    path=path,
+                    sha256=matched.group(1),
+                    lines=_quoted_line_numbers(matched.group(2), where),
+                ),
+                ("\n".join(quoted) + "\n").encode("utf-8"),
+            )
+        )
+    return tuple(blocks)
+
+
+def check_advisory_note_sources(
+    digest: str,
+    data: bytes,
+    table: Mapping[str, tuple[QuotedSource, ...]] | None = None,
+) -> None:
+    """Refuse a note whose headers disagree with the sources declared for it.
+
+    LIC5-VERIFY F1: the note's header claimed "lines 14 and 18" while the bytes
+    under it could be any other slice, and nothing noticed. ADVISORY_TEXT_SOURCES
+    is the one declaration of what each note quotes; the note's own headers must
+    match it, file, digest and line numbers. The quoted bytes are compared to the
+    named source itself by the suite, which pins the source file under
+    tests/data/note-sources/.
+    """
+    if table is None:
+        table = ADVISORY_TEXT_SOURCES
+    declared = table.get(digest)
+    if declared is None:
+        raise ValueError(f"advisory replacement text {digest} declares no sources")
+    found = tuple(source for source, _ in parse_quoted_blocks(data, f"advisory note {digest}"))
+    if found != tuple(declared):
+        raise ValueError(
+            f"advisory note {digest} quotes {found}, "
+            f"but ADVISORY_TEXT_SOURCES declares {tuple(declared)}"
+        )
+
+
 def check_advisory_texts(
     payload: Mapping[str, Any],
     table: Mapping[str, str] | None = None,
@@ -652,6 +809,13 @@ def check_advisory_texts(
     if unused:
         raise ValueError(
             f"advisory replacement texts name no determinations quote: {unused}"
+        )
+    # LIC5-FIX (F1/F3): a note with no declared sources cannot be checked
+    # against them, so it is refused before it can reach a screen.
+    undeclared = sorted(set(table.values()) - set(ADVISORY_TEXT_SOURCES))
+    if undeclared:
+        raise ValueError(
+            f"advisory replacement texts declare no quoted sources: {undeclared}"
         )
 
 
