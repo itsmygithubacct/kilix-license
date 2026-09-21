@@ -387,6 +387,44 @@ class AuthorityTests(unittest.TestCase):
         self.assertEqual(parse_receipt(receipt.to_jsonable()).acceptance,
                          receipt.acceptance)
 
+    def test_a_receipt_file_that_is_not_json_is_refused_not_a_value_error(self) -> None:
+        # LIC6-VERIFY F7's shape, at a second field, found by the require()
+        # differential: two calls of 280 raised a bare ValueError ("receipt is
+        # not UTF-8 JSON") for a file AT THE EXACT LOOKUP PATH whose bytes are
+        # not JSON -- a truncated write, a half-restored backup, a file
+        # replaced by something else. That leaves the typed-failure contract
+        # and reaches the same consumer, which catches CoverageRefused only.
+        # Present since 417b0c2d, in every version.
+        from kilix_license.coverage import AssetRef, require
+        from kilix_license.receipts import parse_receipt_bytes
+
+        for name, data in (
+            ("empty", b""),
+            ("not-utf8", b"\xff\xfe\x00rubbish"),
+            ("truncated", b'{"schema": "kilix.license.receipt/v1"'),
+            ("a json array", b"[1, 2, 3]"),
+            ("a json string", b'"receipt"'),
+        ):
+            with self.subTest(bytes=name):
+                with self.assertRaises(ReceiptShapeError) as caught:
+                    parse_receipt_bytes(data)
+                self.assertEqual(caught.exception.field, "receipt")
+        # and through the gate a consumer actually calls
+        receipt = self._pocket_receipt()
+        path = self.store.path_for(receipt.record_digest, receipt.manifest_digest)
+        path.write_bytes(b"\xff\xfe\x00rubbish")
+        ref = AssetRef(
+            id=self.fixtures.pocket.id,
+            record_digest=receipt.record_digest,
+            manifest_digest=receipt.manifest_digest,
+        )
+        index = __import__(
+            "kilix_license.records", fromlist=["RecordIndex"]
+        ).RecordIndex([self.fixtures.pocket])
+        with self.assertRaises(ReceiptShapeError) as caught:
+            require(ref, records=index, store=self.store)
+        self.assertEqual(caught.exception.field, "receipt")
+
     def test_receipt_from_agreement_requires_named_binding_ids(self) -> None:
         agreement = capture_agreement(
             self.fixtures.pocket, typed_agreement_line(self.fixtures.pocket)

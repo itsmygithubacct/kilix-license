@@ -219,7 +219,27 @@ def parse_receipt(raw: Mapping[str, Any]) -> Receipt:
 
 
 def parse_receipt_bytes(data: bytes) -> Receipt:
-    return parse_receipt(load_json_object(data, "receipt"))
+    """Parse one receipt's bytes, refusing malformed bytes by type.
+
+    LIC6-VERIFY F7's shape, at a second field. The differential found two
+    calls of 280 in which ``require()`` raised a bare ``ValueError`` --
+    ``receipt is not UTF-8 JSON`` -- for a file at the exact lookup path whose
+    bytes are not JSON at all: a truncated write, a half-restored backup, a
+    file replaced by something else. That escapes the typed-failure contract
+    exactly as a non-string ``captured_at`` did, and reaches the same
+    consumer, which catches ``CoverageRefused`` only and shows a traceback
+    where a refusal belongs. Present since 417b0c2d, in every version; the
+    two differential lines this changes are the only intended behaviour
+    change in the wave, and they move from ``RAISED ValueError`` to
+    ``REFUSED ReceiptShapeError:receipt``.
+    """
+    try:
+        payload = load_json_object(data, "receipt")
+    except ReceiptShapeError:
+        raise
+    except ValueError as error:
+        raise ReceiptShapeError("receipt", str(error)) from error
+    return parse_receipt(payload)
 
 
 def receipt_from_agreement(
