@@ -1484,6 +1484,21 @@ class ApplicationAuthorityTests(unittest.TestCase):
             "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
         )
 
+    def test_needle2_runtime_and_train_show_needle2s_licence(self) -> None:
+        # One upstream, one revision, one licence: the two further assets are
+        # their own records (as every release asset is), showing needle2's text,
+        # licensor and text identity, each with its own record digest.
+        by_id = {r.id: r for r in self.apps}
+        base = by_id["needle2"]
+        for record_id in ("needle2-runtime", "needle2-train"):
+            record = by_id[record_id]
+            for field in ("licensor", "licence_ids", "decision_class",
+                          "licence_text_id", "text_sha256"):
+                self.assertEqual(getattr(record, field), getattr(base, field),
+                                 f"{record_id}.{field}")
+        digests = {render_record_bytes(r) for r in by_id.values()}
+        self.assertEqual(len(digests), 3)
+
     def test_the_loader_serves_both_authorities(self) -> None:
         index = load_determined_records()
         ids = {record.id for record in index}
