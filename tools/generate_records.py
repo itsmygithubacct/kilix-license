@@ -18,12 +18,15 @@ if str(SRC) not in sys.path:
 
 from kilix_license.errors import HandEditedRecord  # noqa: E402
 from kilix_license.generate import (  # noqa: E402
+    APP_RECORDS_DIRNAME,
     RECORDS_DIRNAME,
     TEXTS_DIRNAME,
     check_quote_texts,
     check_records,
     data_dir,
+    generate_app_records,
     generate_records,
+    load_app_determinations,
     load_determinations,
     write_quote_texts,
     write_records,
@@ -51,17 +54,33 @@ def main(argv: list[str]) -> int:
     _data, payload, pin = load_determinations(directory)
     texts = directory / TEXTS_DIRNAME
     records_path = directory / RECORDS_DIRNAME
+    _app_data, app_payload, app_pin = load_app_determinations(directory)
+    app_records_path = directory / APP_RECORDS_DIRNAME
     if args.check:
         # Read-only (LIC3-3): a missing or changed quote text fails; it is never written.
         check_quote_texts(payload, texts)
+        check_quote_texts(app_payload, texts)
         records = generate_records(payload, pin=pin, texts_dir=texts)
         check_records(records, records_path)
+        app_records = generate_app_records(
+            app_payload, pin=app_pin, texts_dir=texts, release_payload=payload
+        )
+        check_records(app_records, app_records_path)
         sys.stdout.write(f"records {len(records)} match generator (pin {pin})\n")
+        sys.stdout.write(
+            f"application records {len(app_records)} match generator (pin {app_pin})\n"
+        )
         return 0
     write_quote_texts(payload, texts)
+    write_quote_texts(app_payload, texts)
     records = generate_records(payload, pin=pin, texts_dir=texts)
+    app_records = generate_app_records(
+        app_payload, pin=app_pin, texts_dir=texts, release_payload=payload
+    )
     write_records(records, records_path)
+    write_records(app_records, app_records_path)
     sys.stdout.write(f"wrote {len(records)} records (pin {pin})\n")
+    sys.stdout.write(f"wrote {len(app_records)} application records (pin {app_pin})\n")
     return 0
 
 

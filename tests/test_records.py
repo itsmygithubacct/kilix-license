@@ -29,6 +29,9 @@ from kilix_license.generate import (
     ADVISORY_NOTE_AUTHORED_SHA256,
     ADVISORY_TEXT_SOURCES,
     ADVISORY_TEXTS,
+    APP_LICENCE_TEXT_IDS,
+    APP_RECORD_IDS,
+    APP_RECORDS_DIRNAME,
     AUTHORED_DECLARATION,
     BINDING_TEXT_IDS,
     CONVERTER_ID,
@@ -48,7 +51,9 @@ from kilix_license.generate import (
     check_records,
     data_dir,
     decision_class_for_entry,
+    generate_app_records,
     generate_records,
+    load_app_determinations,
     licence_ids_of,
     licence_text_digest,
     licensors_of,
@@ -642,9 +647,10 @@ class LicenceTextIdentityTests(unittest.TestCase):
         for record in self.records:
             with self.subTest(record=record.id):
                 self.assertEqual(record.licence_text_id, LICENCE_TEXT_IDS[record.id])
+        tables = {**LICENCE_TEXT_IDS, **APP_LICENCE_TEXT_IDS}
         for record in load_determined_records():
             with self.subTest(committed=record.id):
-                self.assertEqual(record.licence_text_id, LICENCE_TEXT_IDS[record.id])
+                self.assertEqual(record.licence_text_id, tables[record.id])
 
     def test_one_licence_text_one_identity(self) -> None:
         # The identity and the licence text digest correspond one to one today, so
@@ -1430,3 +1436,102 @@ class AdvisoryNoteTests(unittest.TestCase):
                 self.assertEqual(stored, quote["text"].encode("utf-8"))
                 checked += 1
         self.assertGreater(checked, 0)
+
+
+class ApplicationAuthorityTests(unittest.TestCase):
+    """determinations-apps.json: application models with their own pin.
+
+    An entry appended to determinations.json moves every release record digest,
+    because each record cites that file's digest, and receipts name record
+    digests. The application authority adds a record while moving none.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data, cls.payload, cls.pin = load_determinations(DATA)
+        cls.app_data, cls.app_payload, cls.app_pin = load_app_determinations(DATA)
+        cls.texts_dir = DATA / "texts"
+        cls.release = generate_records(cls.payload, pin=cls.pin, texts_dir=cls.texts_dir)
+        cls.apps = generate_app_records(
+            cls.app_payload, pin=cls.app_pin, texts_dir=cls.texts_dir,
+            release_payload=cls.payload,
+        )
+
+    def _generate(self, payload) -> list:
+        return generate_app_records(
+            payload, pin=self.app_pin, texts_dir=self.texts_dir, release_payload=self.payload
+        )
+
+    def test_committed_application_records_match_the_generator(self) -> None:
+        check_records(self.apps, DATA / APP_RECORDS_DIRNAME)
+        self.assertEqual(sorted(r.id for r in self.apps), sorted(APP_RECORD_IDS))
+
+    def test_application_records_cite_their_own_pin(self) -> None:
+        self.assertNotEqual(self.app_pin, self.pin)
+        for record in self.apps:
+            self.assertEqual(record.determinations_sha256, self.app_pin)
+        for record in self.release:
+            self.assertEqual(record.determinations_sha256, self.pin)
+
+    def test_needle2_record(self) -> None:
+        [record] = [r for r in self.apps if r.id == "needle2"]
+        self.assertEqual(record.licensor, "Cactus Compute, Inc.")
+        self.assertEqual(record.licence_ids, ("Apache-2.0",))
+        self.assertEqual(record.decision_class, "affirmative")
+        self.assertEqual(record.licence_text_id, "debian/common-licenses/Apache-2.0")
+        self.assertEqual(
+            record.text_sha256,
+            "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        )
+
+    def test_the_loader_serves_both_authorities(self) -> None:
+        index = load_determined_records()
+        ids = {record.id for record in index}
+        self.assertEqual(ids, {r.id for r in self.release} | {r.id for r in self.apps})
+        for record in self.apps:
+            self.assertEqual(render_record_bytes(index.by_id(record.id)),
+                             render_record_bytes(record))
+
+    def test_an_application_id_may_not_shadow_a_release_record(self) -> None:
+        payload = copy.deepcopy(self.app_payload)
+        payload["entries"][0]["entry_id"] = "whisper-tiny-ggml"
+        with self.assertRaisesRegex(ValueError, "collides with a release record"):
+            self._generate(payload)
+
+    def test_one_text_keeps_one_identity_across_both_tables(self) -> None:
+        split = dict(APP_LICENCE_TEXT_IDS, needle2="huggingface.co/Cactus-Compute/needle2/LICENSE")
+        with mock.patch.dict("kilix_license.generate.APP_LICENCE_TEXT_IDS", split):
+            with self.assertRaisesRegex(ValueError, "several text identities"):
+                self._generate(self.app_payload)
+
+    def test_the_record_set_is_declared(self) -> None:
+        payload = copy.deepcopy(self.app_payload)
+        payload["entries"] = []
+        with self.assertRaisesRegex(ValueError, "APP_RECORD_IDS"):
+            self._generate(payload)
+
+    def test_application_advisories_are_refused(self) -> None:
+        payload = copy.deepcopy(self.app_payload)
+        payload["entries"][0]["advisories"] = [payload["entries"][0]["attribution"][0]]
+        with self.assertRaisesRegex(ValueError, "advisory notes"):
+            self._generate(payload)
+
+    def test_a_hand_edited_application_record_is_refused(self) -> None:
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-license-app-records-"))
+        self.addCleanup(shutil.rmtree, scratch, True)
+        target = scratch / APP_RECORDS_DIRNAME
+        shutil.copytree(DATA / APP_RECORDS_DIRNAME, target)
+        path = target / record_filename("needle2")
+        path.write_bytes(path.read_bytes().replace(b"Cactus Compute, Inc.", b"Someone Else"))
+        with self.assertRaises(HandEditedRecord):
+            check_records(self.apps, target)
+
+    def test_the_application_pin_guards_its_file(self) -> None:
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-license-app-pin-"))
+        self.addCleanup(shutil.rmtree, scratch, True)
+        for name in ("determinations-apps.json", "determinations-apps.sha256"):
+            shutil.copy(DATA / name, scratch / name)
+        path = scratch / "determinations-apps.json"
+        path.write_bytes(path.read_bytes().replace(b"Cactus Compute, Inc.", b"Someone Else"))
+        with self.assertRaises(TextDigestMismatch):
+            load_app_determinations(scratch)
