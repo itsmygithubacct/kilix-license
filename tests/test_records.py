@@ -246,6 +246,25 @@ class GeneratedRecordTests(unittest.TestCase):
     def test_required_in_closure_models_have_records(self) -> None:
         self.assertEqual(set(REQUIRED_RECORD_IDS), set(self.by_id))
 
+    def test_pocket_cpu_has_separate_alba_binding_and_screen(self) -> None:
+        old = self.by_id["pocket-tts-english-q8_0"]
+        new = self.by_id["pocket-tts-english-python-alba"]
+        self.assertNotEqual(old.digest, new.digest)
+        self.assertEqual(old.digest,
+                         "1dd24fd142b32de1353d6913f09a19d3bbd81990040b70a47986b8a3e10f1fab")
+        self.assertEqual(new.licence_ids, ("CC-BY-4.0",))
+        self.assertEqual(new.decision_class, "affirmative")
+        self.assertEqual(new.binding_conditions[0].text_sha256,
+                         old.binding_conditions[0].text_sha256)
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-pocket-cpu-screen-"))
+        texts = load_determined_texts(scratch / "texts")
+        records = load_determined_records()
+        screen = render_screen(new, texts, receipts=FakeStore(scratch / "receipts"),
+                               records=records).decode("utf-8")
+        self.assertIn("Characters voice-acted by Alba MacKenna:", screen)
+        self.assertIn("Released under the CC BY 4.0 licence.", screen)
+        self.assertIn("binding:pocket-prohibited-use", screen)
+
     def test_no_kilix_llm_record(self) -> None:
         for record_id in self.by_id:
             self.assertFalse(
@@ -582,7 +601,9 @@ class BindingTextIdentityTests(unittest.TestCase):
         ).splitlines():
             digest, record_id = line.split("  ", 1)
             pinned[record_id] = digest
-        self.assertEqual({r.id: r.digest for r in self.records}, pinned)
+        # Adding a new asset must not rebind receipts for older models.
+        self.assertEqual({r.id: r.digest for r in self.records if r.id in pinned}, pinned)
+        self.assertEqual(set(self.by_id) - set(pinned), {"pocket-tts-english-python-alba"})
         for record in self.records:
             stripped = replace(
                 record,
