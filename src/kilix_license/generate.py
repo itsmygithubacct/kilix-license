@@ -847,13 +847,23 @@ def check_licence_text_ids(
     """
     if table is None:
         table = LICENCE_TEXT_IDS
-    shown: list[tuple[str, str]] = []
+    shown: list[tuple[str, str, Mapping[str, str]]] = []
     for entry in payload.get("entries") or []:
-        shown.append((str(entry.get("entry_id")), licence_text_digest(entry)))
-    shown.append((CONVERTER_ID, _converter_mit_digest(payload)))
+        shown.append((str(entry.get("entry_id")), licence_text_digest(entry), table))
+    shown.append((CONVERTER_ID, _converter_mit_digest(payload), table))
+    _refuse_shared_text_ids(shown)
+
+
+def _refuse_shared_text_ids(shown: list[tuple[str, str, Mapping[str, str]]]) -> None:
+    """The identity rules both authorities apply, over (record, text digest, table) rows.
+
+    One place, so the application check cannot drift from the release check:
+    it once omitted the converter row and the binding-text refusal (review of
+    the needle2 records, 2026-09-24).
+    """
     digests: dict[str, set[str]] = {}
     identities: dict[str, set[str]] = {}
-    for record_id, digest in shown:
+    for record_id, digest, table in shown:
         text_id = table.get(record_id)
         if text_id is None:
             continue
@@ -1258,25 +1268,17 @@ def check_app_licence_text_ids(
     app_payload: Mapping[str, Any],
     release_payload: Mapping[str, Any],
 ) -> None:
-    """One licence text, one identity, across the release and application tables."""
-    identities: dict[str, set[str]] = {}
-    digests: dict[str, set[str]] = {}
+    """One licence text, one identity, across the release and application tables.
+
+    The same rules as check_licence_text_ids, over both tables together,
+    including the converter's MIT text and the binding-text refusal.
+    """
     shown = [(str(e.get("entry_id")), licence_text_digest(e), LICENCE_TEXT_IDS)
              for e in release_payload.get("entries") or []]
+    shown.append((CONVERTER_ID, _converter_mit_digest(release_payload), LICENCE_TEXT_IDS))
     shown += [(str(e.get("entry_id")), licence_text_digest(e), APP_LICENCE_TEXT_IDS)
               for e in app_payload.get("entries") or []]
-    for record_id, digest, table in shown:
-        text_id = table.get(record_id)
-        if text_id is None:
-            continue
-        identities.setdefault(digest, set()).add(text_id)
-        digests.setdefault(text_id, set()).add(digest)
-    split = sorted(sorted(found) for found in identities.values() if len(found) > 1)
-    if split:
-        raise ValueError(f"one licence text carries several text identities: {split}")
-    merged = sorted(text_id for text_id, found in digests.items() if len(found) > 1)
-    if merged:
-        raise ValueError(f"licence text identities cover more than one licence text: {merged}")
+    _refuse_shared_text_ids(shown)
 
 
 def generate_app_records(

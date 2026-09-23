@@ -47,6 +47,7 @@ from kilix_license.generate import (
     check_advisory_note_sources,
     check_advisory_texts,
     check_binding_text_ids,
+    check_app_licence_text_ids,
     check_licence_text_ids,
     check_records,
     data_dir,
@@ -1462,6 +1463,33 @@ class ApplicationAuthorityTests(unittest.TestCase):
             payload, pin=self.app_pin, texts_dir=self.texts_dir, release_payload=self.payload
         )
 
+    def test_app_identities_obey_every_release_identity_rule(self) -> None:
+        # Review of the needle2 records (2026-09-24): the application check
+        # omitted the converter row and the binding-text refusal, so an app
+        # record with a new licence text could take either kind of identity.
+        from kilix_license import generate as gen
+        check_app_licence_text_ids(self.app_payload, self.payload)
+        real = gen.licence_text_digest
+
+        def new_text(entry):
+            return "f" * 64 if entry.get("entry_id") in APP_RECORD_IDS else real(entry)
+        for identity, refusal in (
+                (gen.LICENCE_TEXT_IDS[gen.CONVERTER_ID], "more than one licence text"),
+                (BINDING_TEXT_IDS["llama3-community-licence-full-text"], "also name binding texts")):
+            table = {record_id: identity for record_id in APP_RECORD_IDS}
+            with self.subTest(identity=identity), \
+                    mock.patch.object(gen, "licence_text_digest", new_text), \
+                    mock.patch.dict(gen.APP_LICENCE_TEXT_IDS, table):
+                with self.assertRaises(ValueError) as caught:
+                    check_app_licence_text_ids(self.app_payload, self.payload)
+                self.assertIn(refusal, str(caught.exception))
+
+    def test_record_path_finds_application_records(self) -> None:
+        from kilix_license.catalog import record_path
+        for record_id in APP_RECORD_IDS:
+            self.assertTrue(record_path(record_id).is_file(), record_id)
+            self.assertEqual(record_path(record_id).parent.name, APP_RECORDS_DIRNAME)
+
     def test_committed_application_records_match_the_generator(self) -> None:
         check_records(self.apps, DATA / APP_RECORDS_DIRNAME)
         self.assertEqual(sorted(r.id for r in self.apps), sorted(APP_RECORD_IDS))
@@ -1492,8 +1520,10 @@ class ApplicationAuthorityTests(unittest.TestCase):
         base = by_id["needle2"]
         for record_id in ("needle2-runtime", "needle2-train"):
             record = by_id[record_id]
+            # statements too: dropping the card's attribution from one asset
+            # survived the suite (review mutation M7).
             for field in ("licensor", "licence_ids", "decision_class",
-                          "licence_text_id", "text_sha256"):
+                          "licence_text_id", "text_sha256", "statements"):
                 self.assertEqual(getattr(record, field), getattr(base, field),
                                  f"{record_id}.{field}")
         digests = {render_record_bytes(r) for r in by_id.values()}

@@ -48,7 +48,9 @@ def load_determined_texts(store_root: Path, *, package_root: Path | None = None)
 
 
 def record_path(record_id: str, root: Path | None = None) -> Path:
-    return records_dir(root) / record_filename(record_id)
+    """Where the record is stored: an application record lives in app-records/."""
+    app = app_records_dir(root) / record_filename(record_id)
+    return app if app.is_file() else records_dir(root) / record_filename(record_id)
 
 
 # Default package data location, used by tools when cwd is the repository root.
