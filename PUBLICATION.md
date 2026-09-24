@@ -1,8 +1,8 @@
 # Publication disposition
 
-**Disposition:** `PUBLIC`
+**Disposition:** `PUBLISHED`
 
-**Authorization:** `OWNER_APPROVED` (2026-09-23)
+**Authorization:** `AUTHORIZED` (owner approval, 2026-09-23)
 
 **Effective:** 2026-09-23
 
