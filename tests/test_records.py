@@ -271,6 +271,45 @@ class GeneratedRecordTests(unittest.TestCase):
         self.assertIn("Released under the CC BY 4.0 licence.", screen)
         self.assertIn("binding:pocket-prohibited-use", screen)
 
+    def test_whisper_small_shares_whisper_licence_and_names_both_licensors(self) -> None:
+        tiny = self.by_id["whisper-tiny-ggml"]
+        small = self.by_id["faster-whisper-small-en"]
+        # Literals, not tiny's values: a regression in the shared entry must fail too.
+        self.assertEqual(small.licensor, "OpenAI; SYSTRAN")
+        self.assertEqual(small.licence_ids, ("MIT",))
+        self.assertEqual(small.decision_class, "affirmative")
+        self.assertEqual(small.text_sha256,
+                         "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d")
+        self.assertEqual(small.licence_text_id, "kilix/config/model_notices#whisper")
+        self.assertEqual(small.licence_text_id, tiny.licence_text_id)
+        self.assertEqual(small.binding_conditions, ())
+        self.assertEqual([(a.id, a.text_sha256) for a in small.advisories],
+                         [("whisper-card-caution",
+                           "0e9d0d19fa02b8f246d9902d93a2b0b0fac7cb07a518257ffa7d102d1c37c638")])
+        self.assertEqual(small.advisories, tiny.advisories)
+        self.assertNotEqual(small.digest, tiny.digest)
+        entry = next(e for e in self.payload["entries"]
+                     if e["entry_id"] == "faster-whisper-small-en")
+        self.assertEqual(entry["status"], "DETERMINED")
+        self.assertEqual(entry["upstream"]["revision"],
+                         "d1d751a5f8271d482d14ca55d9e2deeebbae577f")
+        self.assertEqual({f["path"]: (f["bytes"], f["sha256"]) for f in entry["upstream"]["files"]}, {
+            "model.bin": (483545366, "62b2a45b05ee59acb4a5341b33ee35e041395d378d418a18acfe4c9e768ee37a"),
+            "config.json": (2657, "666a9605530ac1f61fa8177f3702b4dacec9966749e42610839fcc32661d5fae"),
+            "tokenizer.json": (2128466, "929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df"),
+            "vocabulary.txt": (422309, "ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf"),
+            "README.md": (1330, "c87ff776137c2ecb30ee3b324b4cf5f38abf9423464613641ee45430bf580851"),
+        })
+        self.assertEqual(entry["owner_decision"]["owner_words"],
+                         ["I accept (MIT, advisory)", "faster-whisper (Recommended)"])
+        scratch = Path(tempfile.mkdtemp(prefix="kilix-whisper-small-screen-"))
+        texts = load_determined_texts(scratch / "texts")
+        records = load_determined_records()
+        screen = render_screen(small, texts, receipts=FakeStore(scratch / "receipts"),
+                               records=records).decode("utf-8")
+        self.assertIn("Copyright (c) 2022 OpenAI", screen)
+        self.assertIn("we caution against using Whisper models to transcribe recordings", screen)
+
     def test_no_kilix_llm_record(self) -> None:
         for record_id in self.by_id:
             self.assertFalse(
@@ -609,7 +648,8 @@ class BindingTextIdentityTests(unittest.TestCase):
             pinned[record_id] = digest
         # Adding a new asset must not rebind receipts for older models.
         self.assertEqual({r.id: r.digest for r in self.records if r.id in pinned}, pinned)
-        self.assertEqual(set(self.by_id) - set(pinned), {"pocket-tts-english-python-alba"})
+        self.assertEqual(set(self.by_id) - set(pinned),
+                         {"pocket-tts-english-python-alba", "faster-whisper-small-en"})
         for record in self.records:
             stripped = replace(
                 record,
