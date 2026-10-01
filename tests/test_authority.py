@@ -75,6 +75,21 @@ class AuthorityTests(unittest.TestCase):
         with self.assertRaises(ParaphraseRefused):
             self.fixtures.texts.put(POCKET_TERMS_SUMMARY_BYTES, label="planted")
 
+    def test_yes_consent_keeps_binding_and_capture_without_fabricated_phrase(self):
+        for answer in ("yes", "y"):
+            agreement = capture_agreement(self.fixtures.pocket, answer)
+            self.assertEqual(agreement.typed_text, answer)
+            receipt = receipt_from_agreement(
+                self.fixtures.pocket, agreement,
+                manifest_digest=FIXTURE_MANIFEST, release_digest=FIXTURE_RELEASE,
+                catalogue_digest=FIXTURE_CATALOGUE)
+            self.assertEqual(receipt.decision, "accept")
+            self.assertEqual(receipt.record_digest, self.fixtures.pocket.digest)
+            self.assertIsNotNone(receipt.acceptance)
+        for answer in ("no", "n", "", None, "yes please"):
+            with self.assertRaises(AgreementRequired):
+                capture_agreement(self.fixtures.pocket, answer)
+
     def test_kristin_needs_no_typed_agreement(self) -> None:
         agreement = capture_agreement(self.fixtures.kristin)
         self.assertEqual(agreement.decision, "record")
