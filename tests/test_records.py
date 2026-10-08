@@ -1587,8 +1587,19 @@ class ApplicationAuthorityTests(unittest.TestCase):
                           "licence_text_id", "text_sha256", "statements"):
                 self.assertEqual(getattr(record, field), getattr(base, field),
                                  f"{record_id}.{field}")
-        digests = {render_record_bytes(r) for r in by_id.values()}
+        digests = {render_record_bytes(by_id[name]) for name in
+                   ("needle2", "needle2-runtime", "needle2-train")}
         self.assertEqual(len(digests), 3)
+
+    def test_whistle_binds_its_own_record_to_the_pinned_apache_text(self) -> None:
+        record = {r.id: r for r in self.apps}["whistle"]
+        self.assertEqual(record.licensor, "Cactus Compute, Inc.")
+        self.assertEqual(record.licence_ids, ("Apache-2.0",))
+        self.assertEqual(record.text_sha256,
+                         "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30")
+        self.assertEqual(record.licence_text_id, "debian/common-licenses/Apache-2.0")
+        self.assertEqual(record.decision_class, "affirmative")
+        self.assertNotEqual(record.digest, {r.id: r for r in self.apps}["needle2"].digest)
 
     def test_the_loader_serves_both_authorities(self) -> None:
         index = load_determined_records()
