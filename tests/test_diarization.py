@@ -1,7 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
-from kilix_license.catalog import load_determined_records,load_determined_texts
+from kilix_license.catalog import load_determined_records,load_determined_texts,record_path
+from kilix_license.records import LicenseRecord
 from kilix_license.generate import DATA_DIR
 from kilix_license.diarization import generate_diarization_records
 from kilix_license.agreement import capture_agreement
@@ -10,6 +11,11 @@ from kilix_license.screen import render_screen
 from fake_store import FakeStore
 
 class DiarizationTests(unittest.TestCase):
+    def test_record_path_locates_the_same_exact_record_as_the_public_index(self):
+        record=load_determined_records().by_id('kilix-diarization-cpu')
+        path=record_path(record.id)
+        self.assertEqual(path.parent.name,'diarization-records')
+        self.assertEqual(LicenseRecord.from_bytes(path.read_bytes()).digest,record.digest)
     def test_exact_grant_component_notices_and_modification_are_shown_before_agreement(self):
         record=load_determined_records().by_id('kilix-diarization-cpu')
         self.assertEqual(record.digest,generate_diarization_records(DATA_DIR)[0].digest)
