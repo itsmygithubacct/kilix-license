@@ -17,6 +17,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from kilix_license.errors import HandEditedRecord  # noqa: E402
+from kilix_license.diarization import generate_diarization_records  # noqa: E402
 from kilix_license.generate import (  # noqa: E402
     APP_RECORDS_DIRNAME,
     RECORDS_DIRNAME,
@@ -56,6 +57,8 @@ def main(argv: list[str]) -> int:
     records_path = directory / RECORDS_DIRNAME
     _app_data, app_payload, app_pin = load_app_determinations(directory)
     app_records_path = directory / APP_RECORDS_DIRNAME
+    diarization_records = generate_diarization_records(directory)
+    diarization_path = directory/'diarization-records'
     if args.check:
         # Read-only (LIC3-3): a missing or changed quote text fails; it is never written.
         check_quote_texts(payload, texts)
@@ -66,6 +69,7 @@ def main(argv: list[str]) -> int:
             app_payload, pin=app_pin, texts_dir=texts, release_payload=payload
         )
         check_records(app_records, app_records_path)
+        check_records(diarization_records,diarization_path)
         sys.stdout.write(f"records {len(records)} match generator (pin {pin})\n")
         sys.stdout.write(
             f"application records {len(app_records)} match generator (pin {app_pin})\n"
@@ -79,6 +83,7 @@ def main(argv: list[str]) -> int:
     )
     write_records(records, records_path)
     write_records(app_records, app_records_path)
+    write_records(diarization_records,diarization_path)
     sys.stdout.write(f"wrote {len(records)} records (pin {pin})\n")
     sys.stdout.write(f"wrote {len(app_records)} application records (pin {app_pin})\n")
     return 0

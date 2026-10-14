@@ -709,7 +709,8 @@ class LicenceTextIdentityTests(unittest.TestCase):
         for record in self.records:
             with self.subTest(record=record.id):
                 self.assertEqual(record.licence_text_id, LICENCE_TEXT_IDS[record.id])
-        tables = {**LICENCE_TEXT_IDS, **APP_LICENCE_TEXT_IDS}
+        from kilix_license.diarization import LICENCE_TEXT_IDS as DIA_TEXT_IDS
+        tables = {**LICENCE_TEXT_IDS, **APP_LICENCE_TEXT_IDS, **DIA_TEXT_IDS}
         for record in load_determined_records():
             with self.subTest(committed=record.id):
                 self.assertEqual(record.licence_text_id, tables[record.id])
@@ -1602,9 +1603,11 @@ class ApplicationAuthorityTests(unittest.TestCase):
         self.assertNotEqual(record.digest, {r.id: r for r in self.apps}["needle2"].digest)
 
     def test_the_loader_serves_both_authorities(self) -> None:
+        from kilix_license.diarization import generate_diarization_records
         index = load_determined_records()
         ids = {record.id for record in index}
-        self.assertEqual(ids, {r.id for r in self.release} | {r.id for r in self.apps})
+        self.assertEqual(ids, {r.id for r in self.release} | {r.id for r in self.apps}
+                         | {r.id for r in generate_diarization_records(DATA)})
         for record in self.apps:
             self.assertEqual(render_record_bytes(index.by_id(record.id)),
                              render_record_bytes(record))
