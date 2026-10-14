@@ -5,7 +5,8 @@
     "route": "PR-G-006 English local CAM++ export with pyannote segmentation 3.0",
     "checkpoint_sha256": "5b1a88b6f8d85826fabef804779c3372b42f3af21457fa48bd5c097c0686b2de",
     "segmentation_sha256": "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079",
-    "graph_sha256": "7cfea971b2231ed7d7dd6324de1de33f8f9dbe65bbb30cf64b4b0b203b566292"
+    "graph_sha256": "7cfea971b2231ed7d7dd6324de1de33f8f9dbe65bbb30cf64b4b0b203b566292",
+    "native_software_notice_sha256": "8923cff8327b3291650bb1658bb7f3d12dd117a6a66aabaf67926221c19a0439"
   },
   "records": [
     {
@@ -20,8 +21,7 @@
         },
         {
           "id": "native-runtime",
-          "role": "Native software component licences and notices",
-          "exception_text_sha256": "8923cff8327b3291650bb1658bb7f3d12dd117a6a66aabaf67926221c19a0439"
+          "role": "Software licences conveyed in notices/native-runtime.txt; no additional model agreement"
         }
       ],
       "binding_conditions": [],

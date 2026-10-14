@@ -16,7 +16,7 @@ class DiarizationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             texts=load_determined_texts(Path(root)/'texts')
             screen=render_screen(record,texts,receipts=FakeStore(Path(root)/'receipts'))
-            for digest in [record.text_sha256]+[x.exception_text_sha256 for x in record.components]+[x.text_sha256 for x in record.statements]:
+            for digest in [record.text_sha256]+[x.exception_text_sha256 for x in record.components if x.exception_text_sha256]+[x.text_sha256 for x in record.statements]:
                 self.assertIn(texts.get(digest),screen)
             self.assertIn(b'5b1a88b6f8d85826',screen)
             self.assertIn(b'converted locally to ONNX',screen)

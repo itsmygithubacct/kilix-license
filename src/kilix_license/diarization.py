@@ -29,6 +29,7 @@ def generate_diarization_records(directory):
         digests = [record.text_sha256]
         digests += [x.exception_text_sha256 for x in record.components if x.exception_text_sha256]
         digests += [x.text_sha256 for x in record.statements]
+        digests.append(value['authority']['native_software_notice_sha256'])
         for digest in digests:
             load_text_file(directory/'texts',digest,record.id)
         if (value['authority']['weight_determination_sha256']
