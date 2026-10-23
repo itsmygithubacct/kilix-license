@@ -1,4 +1,6 @@
 from dataclasses import replace
+from copy import deepcopy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -6,7 +8,7 @@ import unittest
 from kilix_license.agreement import capture_agreement, typed_agreement_line
 from kilix_license.coverage import AssetRef, covers, require
 from kilix_license.errors import CoverageRefused, ReceiptShapeError
-from kilix_license.receipts import parse_receipt, receipt_from_agreement
+from kilix_license.receipts import parse_receipt, parse_receipt_bytes, receipt_from_agreement
 
 from fake_store import FakeStore
 from fixtures import (
@@ -22,6 +24,58 @@ def _flip(digest: str) -> str:
 
 
 class CoverageTests(unittest.TestCase):
+    def test_invalid_decisions_have_typed_refusals(self):
+        exact = self.store.path_for(self.asset.record_digest, self.asset.manifest_digest)
+        sibling = self.store.path_for(self.asset.record_digest, _flip(FIXTURE_MANIFEST))
+        for decision in ([], {}, ["accept"], {"value": "accept"}, None, True, 1, "", "deny"):
+            with self.subTest(decision=decision):
+                payload = dict(self.receipt.to_jsonable(), decision=decision)
+                data = json.dumps(payload).encode("utf-8")
+                for parser, value in ((parse_receipt, payload), (parse_receipt_bytes, data)):
+                    with self.subTest(parser=parser.__name__):
+                        with self.assertRaises(ReceiptShapeError) as refused:
+                            parser(value)
+                        self.assertEqual(refused.exception.field, "decision")
+                for target in (exact, sibling):
+                    with self.subTest(sibling=target == sibling):
+                        for path in (exact, sibling):
+                            path.unlink(missing_ok=True)
+                        target.write_bytes(data)
+                        with self.assertRaises(CoverageRefused) as refused:
+                            require(self.asset, records=self.fixtures.index, store=self.store)
+                        self.assertEqual(refused.exception.field, "decision")
+                        self.assertIsInstance(refused.exception.__cause__, ReceiptShapeError)
+                        self.assertEqual(refused.exception.__cause__.field, "decision")
+
+    def test_malformed_field_values_refuse_exact_and_sibling_receipts(self):
+        cases = [("record_digest", "invalid", False),
+                 ("manifest_digest", "invalid", False),
+                 ("binding_condition_text_digests", [], False),
+                 ("context", [], False),
+                 ("catalogue_digest", "invalid", True),
+                 ("release_digest", "invalid", True),
+                 ("advisory_digests", {"notice": "invalid"}, True),
+                 ("statement_digests", {"notice": "invalid"}, True),
+                 ("component_exception_digests", [], True),
+                 ("binding_text_ids", {"pocket-prohibited-use": "spaces invalid"}, True),
+                 ("licence_text_id", "spaces invalid", True)]
+        exact = self.store.path_for(self.asset.record_digest, self.asset.manifest_digest)
+        sibling = self.store.path_for(self.asset.record_digest, _flip(FIXTURE_MANIFEST))
+        for field, value, context in cases:
+            for target in (exact, sibling):
+                with self.subTest(field=field, sibling=target == sibling):
+                    for path in (exact, sibling):
+                        path.unlink(missing_ok=True)
+                    payload = deepcopy(self.receipt.to_jsonable())
+                    (payload["context"] if context else payload)[field] = value
+                    target.write_text(json.dumps(payload))
+                    with self.assertRaises(CoverageRefused) as refused:
+                        require(self.asset, records=self.fixtures.index, store=self.store)
+                    shape = refused.exception.__cause__
+                    self.assertIsInstance(shape, ReceiptShapeError)
+                    self.assertIsInstance(shape.__cause__, ValueError)
+                    self.assertIn(field, str(shape))
+
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="kilix-license-coverage-"))
         self.fixtures = build_fixtures(self.root)
