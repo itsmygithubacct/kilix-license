@@ -710,7 +710,8 @@ class LicenceTextIdentityTests(unittest.TestCase):
             with self.subTest(record=record.id):
                 self.assertEqual(record.licence_text_id, LICENCE_TEXT_IDS[record.id])
         from kilix_license.diarization import LICENCE_TEXT_IDS as DIA_TEXT_IDS
-        tables = {**LICENCE_TEXT_IDS, **APP_LICENCE_TEXT_IDS, **DIA_TEXT_IDS}
+        from kilix_license.lfm2 import LICENCE_TEXT_IDS as LFM_TEXT_IDS
+        tables = {**LICENCE_TEXT_IDS, **APP_LICENCE_TEXT_IDS, **DIA_TEXT_IDS, **LFM_TEXT_IDS}
         for record in load_determined_records():
             with self.subTest(committed=record.id):
                 self.assertEqual(record.licence_text_id, tables[record.id])
@@ -1607,7 +1608,8 @@ class ApplicationAuthorityTests(unittest.TestCase):
         index = load_determined_records()
         ids = {record.id for record in index}
         self.assertEqual(ids, {r.id for r in self.release} | {r.id for r in self.apps}
-                         | {r.id for r in generate_diarization_records(DATA)})
+                         | {r.id for r in generate_diarization_records(DATA)}
+                         | {'lfm2-kilix-commands'})
         for record in self.apps:
             self.assertEqual(render_record_bytes(index.by_id(record.id)),
                              render_record_bytes(record))
