@@ -64,9 +64,7 @@ build:
 	trap 'rm -rf "$$venv"' EXIT; \
 	$(UV) venv "$$venv" --python $(PYTHON_VERSION) >/dev/null; \
 	$(UV) pip install --python "$$venv/bin/python" $(DIST)/*.whl >/dev/null; \
-	"$$venv/bin/python" -c 'import kilix_license, sys; \
-	 sys.exit(0 if kilix_license.__version__ else 1)'; \
-	printf 'installed wheel imports: 1/1\n'
+	"$$venv/bin/python" -I tools/verify_packaged_data.py
 
 records:
 	$(UV) run --frozen --no-sync --python $(PYTHON_VERSION) \
