@@ -1,9 +1,12 @@
 """Versioned distribution policy for standard licences without extra terms."""
-from dataclasses import replace
+import hashlib
 
 from kilix_license.agreement import Agreement, STANDARD_POLICY, observe_capture
 from kilix_license.errors import AgreementRequired
 
+
+POLICY_TEXT = b"Standard licences without additional terms are authorized by distribution policy, not a typed user answer. Original licences and notices remain required.\n"
+POLICY_SHA256 = hashlib.sha256(POLICY_TEXT).hexdigest()
 
 STANDARD_IDS = frozenset({
     'Apache-2.0', 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC', 'Zlib',
@@ -43,7 +46,8 @@ def capture_standard_policy(record):
     """Record distribution-policy authorization, never a fabricated typed Yes."""
     if not standard_policy_eligible(record):
         raise AgreementRequired('licence has terms outside the standard distribution policy')
-    observed = replace(observe_capture(), capture_mode=STANDARD_POLICY)
+    observed = observe_capture()
     return Agreement(record.id, (), record.expected_decision, None,
                      record_digest=record.digest,
-                     binding_condition_text_digests={}, acceptance=observed)
+                     binding_condition_text_digests={}, acceptance=observed,
+                     authorization_policy=STANDARD_POLICY)

@@ -38,11 +38,10 @@ def covers(
     """
     parse_receipt(receipt.to_jsonable())
     from kilix_license.agreement import STANDARD_POLICY
-    from kilix_license.standard_policy import standard_policy_eligible
-    if (receipt.acceptance is not None
-            and receipt.acceptance.capture_mode == STANDARD_POLICY
-            and not standard_policy_eligible(record)):
-        raise CoverageRefused('acceptance.capture_mode', 'standard policy does not cover these terms')
+    from kilix_license.standard_policy import standard_policy_eligible, POLICY_SHA256
+    policy = (receipt.statement_digests or {}).get(STANDARD_POLICY)
+    if policy is not None and (policy != POLICY_SHA256 or not standard_policy_eligible(record)):
+        raise CoverageRefused('statement_digests', 'standard policy does not cover these terms')
     _compare("manifest_digest", manifest_digest, receipt.manifest_digest)
     _compare("licence_id", record.id, receipt.licence_id)
     _compare("licensor", record.licensor, receipt.licensor)
@@ -131,7 +130,9 @@ def require(
         raise CoverageRefused("manifest_digest")
     if receipt.record_digest != asset.record_digest:
         raise CoverageRefused("record_digest")
+    from kilix_license.agreement import STANDARD_POLICY
     if captured_at_a_terminal and not (
+        STANDARD_POLICY not in (receipt.statement_digests or {}) and
         receipt.acceptance is not None
         and receipt.acceptance.was_captured_at_a_terminal
     ):

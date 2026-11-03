@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # _meets_it, arm 4, for why a rule stated in prose needs this rather than a
 # longer list of forbidden phrases. TYPED; the failure prints the new value.
 README_NORMALISED_SHA256 = (
-    "952adc8404c93e5f4dece5fa022f8099c0a390e483242619d8897c59131c2944"
+    "eb686dc39ea3bee1a1fd3880bcee9597178cd0fd240d40d892c5c430d74f2e69"
 )
 
 RECOGNISED_DISPOSITIONS = {"LOCAL_ONLY", "PUBLISHED"}

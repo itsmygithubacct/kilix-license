@@ -17,10 +17,11 @@ class StandardPolicyTests(unittest.TestCase):
                 record = self.records.by_id(name)
                 agreement = lic.capture_standard_policy(record)
                 self.assertIsNone(agreement.typed_text)
-                self.assertEqual(agreement.acceptance.capture_mode, STANDARD_POLICY)
+                self.assertEqual(agreement.authorization_policy, STANDARD_POLICY)
                 receipt = lic.receipt_from_agreement(record, agreement,
                     manifest_digest='1' * 64, release_digest='2' * 64,
                     catalogue_digest='3' * 64)
+                self.assertIn(STANDARD_POLICY, receipt.statement_digests)
                 self.assertTrue(lic.covers(record, receipt, manifest_digest='1' * 64))
                 with self.assertRaises(lic.CoverageRefused):
                     lic.covers(record, receipt, manifest_digest='4' * 64)
@@ -41,6 +42,17 @@ class StandardPolicyTests(unittest.TestCase):
         with self.assertRaises(lic.AgreementRequired):
             lic.receipt_from_agreement(record, agreement, manifest_digest='1' * 64,
                                       release_digest='2' * 64, catalogue_digest='3' * 64)
+
+    def test_policy_marker_cannot_cover_noncommercial_terms(self):
+        from kilix_license.standard_policy import POLICY_SHA256
+        record = next(r for r in self.records if 'NC' in ' '.join(r.licence_ids))
+        # An otherwise valid explicit receipt must not be relabelled as policy.
+        agreement = lic.capture_agreement(record, lic.typed_agreement_line(record))
+        receipt = lic.receipt_from_agreement(record, agreement,
+            manifest_digest='1' * 64, release_digest='2' * 64, catalogue_digest='3' * 64)
+        forged = replace(receipt, statement_digests={STANDARD_POLICY: POLICY_SHA256})
+        with self.assertRaises(lic.CoverageRefused):
+            lic.covers(record, forged, manifest_digest='1' * 64)
 
 
 if __name__ == '__main__':

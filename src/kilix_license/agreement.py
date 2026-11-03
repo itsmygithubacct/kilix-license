@@ -24,7 +24,7 @@ from kilix_license.records import LicenseRecord
 INTERACTIVE_TTY = "interactive-tty"
 NO_TTY = "no-tty"
 STANDARD_POLICY = "standard-license-policy-v1"
-CAPTURE_MODES = (INTERACTIVE_TTY, NO_TTY, STANDARD_POLICY)
+CAPTURE_MODES = (INTERACTIVE_TTY, NO_TTY)
 
 # \Z, not $: `$` also matches before a final newline, so "...Z\n" parsed and
 # covered (LIC6-VERIFY F9). It carried no identity -- nothing fits after the
@@ -47,8 +47,7 @@ class Acceptance:
       with a wrong or adjusted clock writes a wrong value and nothing notices.
     * ``capture_mode`` is ``interactive-tty`` when that process had a terminal
       on both its standard input and its standard output at capture time, and
-      ``no-tty`` otherwise. ``standard-license-policy-v1`` records an explicit
-      distribution-policy decision without claiming a typed answer. A terminal is evidence that something could have
+      ``no-tty`` otherwise. A terminal is evidence that something could have
       typed; it is not evidence that a person did.
 
     **What a receipt proves, and what it does not** (OD-BC: record, do not
@@ -187,6 +186,7 @@ class Agreement:
     # What was observed about this capture (V-ACC-VERIFY F6). None only for an
     # Agreement a caller built by hand, as every caller did before LIC6.
     acceptance: Acceptance | None = None
+    authorization_policy: str | None = None
 
 
 def typed_agreement_line(record: LicenseRecord) -> str:

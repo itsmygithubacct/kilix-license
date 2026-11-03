@@ -154,8 +154,10 @@ still covers.
 Images and model bundles never carry user receipts. Standard licences can be
 handled during installation by `capture_standard_policy(record)`, using the
 complete determined record and exact model manifest. This writes a local
-`standard-license-policy-v1` receipt, with no typed answer or claim of human
-consent. Original licence texts, notices and modification statements must
+`standard-license-policy-v1` statement digest in the existing receipt
+context, with no typed answer or claim of human consent. Capture mode still
+records the actual terminal state. This preserves older receipt readers;
+the policy statement distinguishes automated authorization. Original licence texts, notices and modification statements must
 remain available beside the installed model.
 
 Unknown licences, extra binding terms and unreviewed component exceptions
