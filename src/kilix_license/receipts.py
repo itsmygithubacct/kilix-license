@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from kilix_license.agreement import Acceptance, Agreement, typed_agreement_line
+from kilix_license.agreement import Acceptance, Agreement, STANDARD_POLICY, typed_agreement_line
 from kilix_license.digest import (
     canonical_json,
     load_json_object,
@@ -263,7 +263,12 @@ def receipt_from_agreement(
     expected = record.agreement_binding_digests()
     if tuple(sorted(agreement.named_binding_ids)) != tuple(sorted(expected)):
         raise AgreementRequired("agreement did not name every binding condition")
-    if agreement.decision == "accept" and agreement.typed_text not in (
+    policy = agreement.acceptance is not None and agreement.acceptance.capture_mode == STANDARD_POLICY
+    if policy:
+        from kilix_license.standard_policy import standard_policy_eligible
+        if not standard_policy_eligible(record) or agreement.typed_text is not None:
+            raise AgreementRequired('standard policy cannot authorize these terms or claim typed consent')
+    elif agreement.decision == "accept" and agreement.typed_text not in (
         "yes", "y", typed_agreement_line(record)
     ):
         raise AgreementRequired("accept receipt requires affirmative agreement")

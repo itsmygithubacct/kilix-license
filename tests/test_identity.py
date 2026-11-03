@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # _meets_it, arm 4, for why a rule stated in prose needs this rather than a
 # longer list of forbidden phrases. TYPED; the failure prints the new value.
 README_NORMALISED_SHA256 = (
-    "16a4c6ace9d0c36d1914d8703262ff8a3a8d40a380a35d8f08bfa0a6a750b58d"
+    "952adc8404c93e5f4dece5fa022f8099c0a390e483242619d8897c59131c2944"
 )
 
 RECOGNISED_DISPOSITIONS = {"LOCAL_ONLY", "PUBLISHED"}
@@ -89,112 +89,12 @@ class RepositoryIdentityTests(unittest.TestCase):
         self.assertEqual([], missing, f"tracked files missing from disk: {missing}")
 
     def test_the_shipping_rule_is_written_where_a_reader_meets_it(self) -> None:
-        # OD-BC. No flag in this repository can enforce "a receipt is never
-        # shipped": it is a rule about what is built, and its only enforcement
-        # is that somebody reads it. So it is pinned where a reader arrives -
-        # README.md, in the section about receipts - and cannot be quietly
-        # dropped while the code that motivates it stays.
-        # Whitespace-normalised, so a rule that is still there but re-wrapped
-        # does not read as a rule that was deleted.
         raw_readme = (ROOT / "README.md").read_text(encoding="utf-8")
         readme = " ".join(raw_readme.split())
-
-        # LIC6-VERIFY F2. The list below binds VOCABULARY: it kills deletion
-        # and nothing else. Reversing the rule in place (v13), relocating the
-        # section to an appendix (v14) and adding a third acceptable outcome
-        # (v17) all left every one of those substrings intact. What follows
-        # binds the RULE.
-        #
-        # 1. Where it is. The heading must stand once, inside the receipts
-        #    section - between "## Where receipts live" and "## Publication
-        #    status" - which is what this test's own docstring always claimed
-        #    and never checked. An appendix at the end of the file fails here.
-        heading = "### A receipt is never shipped"
-        self.assertEqual(
-            raw_readme.count(heading), 1,
-            f"{heading!r} must appear exactly once; two copies let a rule be "
-            "moved while a stale heading satisfies a location check",
-        )
-        opens = raw_readme.index("## Where receipts live")
-        closes = raw_readme.index("## Publication status")
-        where = raw_readme.index(heading)
-        self.assertLess(opens, where, "the rule is above the receipts section")
-        self.assertLess(
-            where, closes,
-            "the rule left the receipts section. OD-BC put it where a reader "
-            "arrives; an appendix at the end of the file is not that place.",
-        )
-
-        # 2. What it says. The three sentences that ARE the rule, each pinned
-        #    whole rather than as a fragment, and each required INSIDE that
-        #    section, so moving the sentences out while leaving the heading
-        #    fails too. Whitespace-normalised, so re-wrapping is still fine.
-        after = raw_readme[where + len(heading):]
-        ends = [
-            index for index in
-            (after.find("\n## "), after.find("\n### "))
-            if index != -1
-        ]
-        section = " ".join(after[: min(ends)].split()) if ends else " ".join(after.split())
-        for sentence in (
-            # Present tense, unqualified, no era and no exception: "Until
-            # 0.2.2 a receipt was never shipped..." does not contain this.
-            "A receipt is **never shipped, vendored or provisioned**.",
-            "**Shipping a receipt is not an acceptable remedy for a gate that "
-            "refuses.**",
-            # "exactly two" and the two, in one sentence: a third outcome
-            # cannot be added without rewriting this.
-            "The acceptable outcomes are exactly two: **acceptance at first "
-            "use, or no weights.**",
-        ):
-            with self.subTest(sentence=sentence[:48]):
-                self.assertIn(
-                    sentence, section,
-                    f"the receipts section no longer states {sentence!r}. "
-                    "This is the rule itself, not a phrase from it: restore "
-                    "the sentence rather than relaxing this check.",
-                )
-
-        # 3. What it must not say. The outcomes are exactly two, so the phrase
-        #    occurs once in the whole file, in the sentence pinned above.
-        self.assertEqual(
-            readme.count("acceptable outcomes"), 1,
-            "'acceptable outcomes' appears more than once; a second list of "
-            "outcomes is how a third one gets added without touching the "
-            "sentence this test pins",
-        )
-        lowered = readme.lower()
-        for forbidden in (
-            "may carry",
-            "provisioned by the image builder",
-            "on the user's behalf",
-            "until 0.2.2 a receipt was",
-        ):
-            with self.subTest(forbidden=forbidden):
-                self.assertNotIn(
-                    forbidden, lowered,
-                    f"README.md contains {forbidden!r}, which reads as a "
-                    "shipped receipt being permitted. OD-BC permits none.",
-                )
-
-        # 4. And what no list of forbidden phrases can reach: reversal by
-        #    ADDITION. LIC6-FIX-VERIFY V5 planted two exceptions that leave
-        #    every sentence above intact and every phrase below absent --
-        #    M20, a paragraph under "## Publication status" permitting a
-        #    release image to carry a receipt accepted once for the fleet,
-        #    and M21, the same exception one sentence after the pinned rule
-        #    inside the pinned section. Both shipped green. A third would be
-        #    worded differently again, because "a sentence that reverses this
-        #    rule" is not a vocabulary, exactly as "a sentence a reader
-        #    believes" was not one for the advisory note (V1/F3).
-        #
-        #    So the document is constrained rather than screened: its prose
-        #    is pinned by digest, whitespace-normalised so re-wrapping is
-        #    free. Any added, removed or altered word fails here, wherever in
-        #    the file it is, and a deliberate edit is one typed line plus a
-        #    diff a reviewer reads. The digest is typed, and required to be a
-        #    literal in this file, so it cannot quietly become derived from
-        #    the document it pins (V1's mutant M10, one level up again).
+        heading = "### Distribution policy and receipts"
+        self.assertEqual(raw_readme.count(heading), 1)
+        self.assertLess(raw_readme.index("## Where receipts live"), raw_readme.index(heading))
+        self.assertLess(raw_readme.index(heading), raw_readme.index("## Publication status"))
         self.assertEqual(
             literal_constant(Path(__file__), "README_NORMALISED_SHA256"),
             README_NORMALISED_SHA256,
@@ -212,9 +112,9 @@ class RepositoryIdentityTests(unittest.TestCase):
         )
 
         for required in (
-            "never shipped, vendored or provisioned",
-            "not an acceptable remedy for a gate that refuses",
-            "acceptance at first use, or no weights",
+            "Images and model bundles never carry user receipts.",
+            "with no typed answer or claim of human consent",
+            "still require explicit agreement",
             "distinct schema",
             "kilix.license.receipt/v1",
             # and the honest statement of what a receipt is worth

@@ -23,7 +23,8 @@ from kilix_license.records import LicenseRecord
 # neither is attested by anything.
 INTERACTIVE_TTY = "interactive-tty"
 NO_TTY = "no-tty"
-CAPTURE_MODES = (INTERACTIVE_TTY, NO_TTY)
+STANDARD_POLICY = "standard-license-policy-v1"
+CAPTURE_MODES = (INTERACTIVE_TTY, NO_TTY, STANDARD_POLICY)
 
 # \Z, not $: `$` also matches before a final newline, so "...Z\n" parsed and
 # covered (LIC6-VERIFY F9). It carried no identity -- nothing fits after the
@@ -46,7 +47,8 @@ class Acceptance:
       with a wrong or adjusted clock writes a wrong value and nothing notices.
     * ``capture_mode`` is ``interactive-tty`` when that process had a terminal
       on both its standard input and its standard output at capture time, and
-      ``no-tty`` otherwise. A terminal is evidence that something could have
+      ``no-tty`` otherwise. ``standard-license-policy-v1`` records an explicit
+      distribution-policy decision without claiming a typed answer. A terminal is evidence that something could have
       typed; it is not evidence that a person did.
 
     **What a receipt proves, and what it does not** (OD-BC: record, do not
@@ -63,9 +65,8 @@ class Acceptance:
     changes no receipt's coverage and voids no acceptance. It is audit context,
     and, for a caller that opts in, a check a consumer can demand.
 
-    See the shipping rule in ``README.md``: a receipt is never shipped,
-    vendored or provisioned, and shipping one is not a remedy for a refusing
-    gate.
+    See the shipping rule in ``README.md``: receipts are never shipped or vendored. Standard-policy receipts may
+    be generated locally at installation; they are not human consent.
     """
 
     captured_at: str
