@@ -830,16 +830,20 @@ class RealRecordLicenceTextTests(unittest.TestCase):
             # are still required; only the marker is absent.
             self.assertEqual(changed_texts(revised, store), {})
 
-    def test_no_marker_between_packaged_records_today(self) -> None:
-        # One identity per licence text: accepting any packaged record marks no
-        # other packaged record, because nothing has been revised.
+    def test_only_revised_runtime_is_marked_between_packaged_records(self) -> None:
+        # LFM2 and LFM3 share model terms but ship different runtime notices.
         for accepted in self.index:
             store = self._store("all-" + accepted.id)
             if accepted.expected_decision == "accept":  # record decisions are not acceptances
                 _accept(accepted, store)
             for shown in self.index:
                 with self.subTest(accepted=accepted.id, shown=shown.id):
-                    self.assertEqual(changed_texts(shown, store, records=self.index), {})
+                    changed = changed_texts(shown, store, records=self.index)
+                    if {accepted.id, shown.id} == {'lfm2-kilix-commands', 'lfm3-kilix-commands'}:
+                        self.assertEqual(set(changed), {'component:native-runtime'})
+                        self.assertEqual(changed['component:native-runtime'].accepted_under, (accepted.id,))
+                    else:
+                        self.assertEqual(changed, {})
 
 
 if __name__ == "__main__":

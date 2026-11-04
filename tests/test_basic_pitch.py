@@ -34,9 +34,19 @@ class BasicPitchTerms(unittest.TestCase):
             f.write_bytes(original);(data/'texts'/NOTICE_SHA256).unlink()
             with self.assertRaises((ValueError,FileNotFoundError)):generate_basic_pitch_records(data)
 
-    def test_all_preexisting_record_and_authority_bytes_are_unchanged(self):
+    def test_unrelated_preexisting_records_and_licence_texts_are_unchanged(self):
         root=Path(__file__).resolve().parents[1]
         entries=subprocess.check_output(['git','ls-tree','-r','--name-only','4b29f156eb3edc793318fc1728c259298599d34e','src/kilix_license/data'],cwd=root,text=True).splitlines()
+        # LFM2 has a separately versioned modification notice. Its determination
+        # and generated record advance with that delivery; original licence
+        # texts, Basic Pitch authority and every other record remain preserved.
+        lfm2_revision = {
+            'src/kilix_license/data/determinations-lfm2.json',
+            'src/kilix_license/data/determinations-lfm2.sha256',
+            'src/kilix_license/data/lfm2-records/lfm2-kilix-commands.json',
+        }
         for name in entries:
+            if name in lfm2_revision:
+                continue
             original=subprocess.check_output(['git','show','4b29f156eb3edc793318fc1728c259298599d34e:'+name],cwd=root)
             self.assertEqual((root/name).read_bytes(),original,name)

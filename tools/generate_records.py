@@ -20,6 +20,7 @@ from kilix_license.errors import HandEditedRecord  # noqa: E402
 from kilix_license.basic_pitch import generate_basic_pitch_records
 from kilix_license.female02 import generate_female02_records
 from kilix_license.lfm2 import generate_lfm2_records
+from kilix_license.lfm3 import generate_lfm3_records
 from kilix_license.needle3 import generate_needle3_records
 from kilix_license.diarization import generate_diarization_records  # noqa: E402
 from kilix_license.generate import (  # noqa: E402
@@ -65,6 +66,8 @@ def main(argv: list[str]) -> int:
     diarization_path = directory/'diarization-records'
     lfm2_records = generate_lfm2_records(directory)
     lfm2_path = directory/'lfm2-records'
+    lfm3_records = generate_lfm3_records(directory)
+    lfm3_path = directory/'lfm3-records'
     needle3_records = generate_needle3_records(directory)
     needle3_path = directory/'needle3-records'
     basic_pitch_records = generate_basic_pitch_records(directory)
@@ -83,6 +86,7 @@ def main(argv: list[str]) -> int:
         check_records(app_records, app_records_path)
         check_records(diarization_records,diarization_path)
         check_records(lfm2_records,lfm2_path)
+        check_records(lfm3_records,lfm3_path)
         check_records(needle3_records,needle3_path)
         check_records(female02_records,female02_path)
         check_records(basic_pitch_records,basic_pitch_path)
@@ -101,6 +105,7 @@ def main(argv: list[str]) -> int:
     write_records(app_records, app_records_path)
     write_records(diarization_records,diarization_path)
     write_records(lfm2_records,lfm2_path)
+    write_records(lfm3_records,lfm3_path)
     write_records(needle3_records,needle3_path)
     write_records(female02_records,female02_path)
     write_records(basic_pitch_records,basic_pitch_path)
