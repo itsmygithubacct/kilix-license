@@ -19,6 +19,7 @@ if str(SRC) not in sys.path:
 from kilix_license.errors import HandEditedRecord  # noqa: E402
 from kilix_license.basic_pitch import generate_basic_pitch_records
 from kilix_license.female02 import generate_female02_records
+from kilix_license.paradee import generate_paradee_records
 from kilix_license.lfm2 import generate_lfm2_records
 from kilix_license.lfm3 import generate_lfm3_records
 from kilix_license.needle3 import generate_needle3_records
@@ -74,6 +75,8 @@ def main(argv: list[str]) -> int:
     basic_pitch_path = directory/'basic-pitch-records'
     female02_records = generate_female02_records(directory)
     female02_path = directory/'female02-records'
+    paradee_records = generate_paradee_records(directory)
+    paradee_path = directory/'paradee-records'
     if args.check:
         # Read-only (LIC3-3): a missing or changed quote text fails; it is never written.
         check_quote_texts(payload, texts)
@@ -89,6 +92,7 @@ def main(argv: list[str]) -> int:
         check_records(lfm3_records,lfm3_path)
         check_records(needle3_records,needle3_path)
         check_records(female02_records,female02_path)
+        check_records(paradee_records,paradee_path)
         check_records(basic_pitch_records,basic_pitch_path)
         sys.stdout.write(f"records {len(records)} match generator (pin {pin})\n")
         sys.stdout.write(
@@ -108,6 +112,7 @@ def main(argv: list[str]) -> int:
     write_records(lfm3_records,lfm3_path)
     write_records(needle3_records,needle3_path)
     write_records(female02_records,female02_path)
+    write_records(paradee_records,paradee_path)
     write_records(basic_pitch_records,basic_pitch_path)
     sys.stdout.write(f"wrote {len(records)} records (pin {pin})\n")
     sys.stdout.write(f"wrote {len(app_records)} application records (pin {app_pin})\n")
