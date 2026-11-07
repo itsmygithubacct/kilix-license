@@ -839,7 +839,10 @@ class RealRecordLicenceTextTests(unittest.TestCase):
             for shown in self.index:
                 with self.subTest(accepted=accepted.id, shown=shown.id):
                     changed = changed_texts(shown, store, records=self.index)
-                    if {accepted.id, shown.id} == {'lfm2-kilix-commands', 'lfm3-kilix-commands'}:
+                    # LFM2's terms are a notice (owner determination 2026-11-07):
+                    # nothing is accepted under it, so it marks nothing on LFM3.
+                    if ({accepted.id, shown.id} == {'lfm2-kilix-commands', 'lfm3-kilix-commands'}
+                            and accepted.expected_decision == "accept"):
                         self.assertEqual(set(changed), {'component:native-runtime'})
                         self.assertEqual(changed['component:native-runtime'].accepted_under, (accepted.id,))
                     else:
