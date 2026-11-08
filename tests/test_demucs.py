@@ -67,6 +67,36 @@ class DemucsTerms(unittest.TestCase):
             'sha256': 'c58b90a793b5a0866253d5351de0cc61000f05835daf6736a0ae3a2e2e22def0'})
         self.assertIn('Make it my determination (Recommended)', authority['determined_by'])
 
+    def test_the_image_distribution_is_the_owners_decision_and_keeps_the_terms(self):
+        authority = json.loads((DATA_DIR / 'determinations-demucs.json').read_bytes())['authority']
+        distribution = authority['distribution']
+        self.assertEqual(distribution['owner_record'], {
+            'path': 'licence-evidence-demucs-htdemucs-6s-2026-11-08/'
+                    'OWNER-DISTRIBUTION-demucs-htdemucs-6s-2026-11-08.md',
+            'bytes': 2683,
+            'sha256': '70c4baa8d8df919ddf0023ab12a8ef7edf43e84f3ff9895e6493c6a464067322'})
+        self.assertIn('Demucs in ISO, Whisper online (Recommended)', distribution['decided_by'])
+        self.assertIn('notices/LICENSE-mit.txt', distribution['image'])
+        self.assertEqual(distribution['declined_by'], [
+            "the model wizard's kilix-playalong page answered no",
+            'KILIX_PLAYALONG_MODELS=0 in the shared settings file'])
+        self.assertNotIn('never shipped', authority['scope'])
+        # The decision is about distribution: the record's terms and digest stay.
+        record = lic.load_determined_records().by_id(MODEL_ID)
+        self.assertEqual(record.digest,
+                         '02f182d709f425adce6d8bb3d69b13aab3e2f976bd8aaf32b3b8eab6c04ae75b')
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / 'data'
+            shutil.copytree(DATA_DIR, data)
+            path = data / 'determinations-demucs.json'
+            value = json.loads(path.read_bytes())
+            del value['authority']['distribution']['owner_record']
+            raw = (json.dumps(value, indent=2) + '\n').encode()
+            path.write_bytes(raw)
+            (data / 'determinations-demucs.sha256').write_text(sha256_hex(raw) + '\n')
+            with self.assertRaisesRegex(ValueError, "distribution lacks the owner's decision"):
+                generate_demucs_records(data)
+
     def test_the_record_covers_only_its_own_artifact(self):
         index = lic.load_determined_records()
         demucs = index.by_id(MODEL_ID)
@@ -134,6 +164,16 @@ class DemucsTerms(unittest.TestCase):
             ['git', 'ls-tree', '-r', '--name-only', BASE, 'src/kilix_license/data'],
             cwd=root, text=True).splitlines()
         self.assertTrue(entries)
+        # Whisper medium.en's determination gained its own distribution entry on
+        # 2026-11-08 (Playalong's default install). Its terms and record digest
+        # are unchanged; test_whisper_medium checks that half.
+        medium_distribution = {
+            'src/kilix_license/data/determinations-whisper-medium.json',
+            'src/kilix_license/data/determinations-whisper-medium.sha256',
+            'src/kilix_license/data/whisper-medium-records/faster-whisper-medium-en.json',
+        }
         for name in entries:
+            if name in medium_distribution:
+                continue
             original = subprocess.check_output(['git', 'show', f'{BASE}:{name}'], cwd=root)
             self.assertEqual((root / name).read_bytes(), original, name)

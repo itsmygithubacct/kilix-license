@@ -42,6 +42,8 @@ class WheelRecordTests(unittest.TestCase):
         self.assertIn('faster-whisper-medium-en', expected_records)
         self.assertIn('demucs-records', families)
         self.assertIn('demucs-htdemucs-6s', expected_records)
+        self.assertIn('whisper-large-v3-records', families)
+        self.assertIn('faster-whisper-large-v3', expected_records)
         with tempfile.TemporaryDirectory(prefix='license-wheel-') as temp:
             root = Path(temp)
             # An independent build export; no live tree build/egg-info writes.
@@ -79,6 +81,7 @@ assert 'kilix-female-02' in records
 assert 'paradee-8m-v1.2' in records
 assert 'faster-whisper-medium-en' in records
 assert 'demucs-htdemucs-6s' in records
+assert 'faster-whisper-large-v3' in records
 lic.load_determined_texts(Path(sys.argv[2]))
 print(json.dumps(records,sort_keys=True))
 '''

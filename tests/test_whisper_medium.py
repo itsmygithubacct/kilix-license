@@ -88,6 +88,32 @@ class WhisperMediumTerms(unittest.TestCase):
             with self.assertRaises((ValueError, FileNotFoundError)):
                 generate_whisper_medium_records(data)
 
+    def test_the_playalong_default_install_is_the_owners_decision_and_keeps_the_terms(self):
+        authority = json.loads((DATA_DIR / 'determinations-whisper-medium.json').read_bytes())['authority']
+        distribution = authority['distribution']
+        self.assertEqual(distribution['owner_record'], {
+            'path': 'licence-evidence-whisper-medium-en-2026-11-07/'
+                    'OWNER-DISTRIBUTION-whisper-medium-en-2026-11-08.md',
+            'bytes': 2515,
+            'sha256': '6798bb899670fc0c1ce3b11bf07fcd0afe6ca9447f15ecde3714a74600850a65'})
+        self.assertIn('"Both"', distribution['decided_by'])
+        self.assertIn('Not in the installation image', distribution['image'])
+        self.assertIn('never shipped', authority['scope'])
+        self.assertEqual(distribution['declined_by'], [
+            "the model wizard's kilix-playalong page answered no",
+            'KILIX_PLAYALONG_MODELS=0 in the shared settings file'])
+        # The decision is about distribution: the record's terms and digest stay.
+        record = lic.load_determined_records().by_id(MODEL_ID)
+        self.assertEqual(record.digest,
+                         'c33e44c18901aa5802f668f733a12f5d39ed63436c5a0eaa96c6eea874e1ae23')
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / 'data'
+            shutil.copytree(DATA_DIR, data)
+            _repin(data, lambda v: v['authority']['distribution'].update(
+                owner_record={'path': 'elsewhere.md', 'bytes': 1, 'sha256': '0' * 64}))
+            with self.assertRaisesRegex(ValueError, "distribution lacks the owner's decision"):
+                generate_whisper_medium_records(data)
+
     def test_no_preexisting_record_or_text_moves(self):
         root = Path(__file__).resolve().parents[1]
         entries = subprocess.check_output(
