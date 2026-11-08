@@ -7,8 +7,9 @@ All notable changes to `kilix-license` are recorded here.
 - Demucs htdemucs_6s (`demucs-htdemucs-6s`), the six-source separator `kilix
   split` runs, has its own determination pin and record, at the owner's request
   of 2026-11-08 to route `kilix split` through kilix-license. The record pins
-  Meta's original weights file `5c90dfd2-34c22ccb.th` and its bag definition as
-  adefossez/demucs `eeac1d15` names them, and shows the repository's MIT text
+  Meta's original weights file `5c90dfd2-34c22ccb.th` as adefossez/demucs
+  `eeac1d15` names it (its `htdemucs_6s.yaml` is that one model with default
+  weights, recorded as evidence), and shows the repository's MIT text
   (licensor Meta Platforms, Inc. and affiliates; relicensed from CC BY-NC 4.0 on
   2020-04-13), the text the EnCodec converter record already carries. Demucs
   publishes no separate weights licence, and the training data's terms are not

@@ -1,9 +1,10 @@
 """Separately pinned terms for the Demucs htdemucs_6s pretrained weights.
 
 The artifact is Meta's original release of the six-source Hybrid Transformer
-Demucs model: the one file and the bag definition that the pinned Demucs source
-(adefossez/demucs at eeac1d15) names in demucs/remote/files.txt and
-htdemucs_6s.yaml, and checks by sha256 prefix. Demucs is released under the
+Demucs model: the one weights file that the pinned Demucs source (adefossez/
+demucs at eeac1d15) names in demucs/remote/files.txt and checks by sha256
+prefix. Its htdemucs_6s.yaml names that single model with default weights, so
+the bag definition is evidence here, not part of the artifact. Demucs is released under the
 MIT licence (README "License" and LICENSE at that commit; relicensed from
 CC BY-NC 4.0 on 2020-04-13). No separate licence is published for the
 weights. The record shows that MIT text, the one Meta's EnCodec converter
@@ -18,14 +19,12 @@ MODEL_ID = "demucs-htdemucs-6s"
 REPOSITORY = "https://github.com/adefossez/demucs"
 REVISION = "eeac1d15891af95b1288d2884b95baa3e5baa96c"
 WEIGHTS_URL = "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/5c90dfd2-34c22ccb.th"
-BAG_URL = ("https://raw.githubusercontent.com/adefossez/demucs/"
-           "eeac1d15891af95b1288d2884b95baa3e5baa96c/demucs/remote/htdemucs_6s.yaml")
 FILES = (
     ("5c90dfd2-34c22ccb.th", WEIGHTS_URL, 54996327,
      "34c22ccb381c6f9fdbf324f04e1e2fe21aaaf293f5ded163a162697ff9a02ddd"),
-    ("htdemucs_6s.yaml", BAG_URL, 21,
-     "207405151270af8fd81c2373c25d27950916682ac91dca7884a11ce13dad6f58"),
 )
+BAG = ("demucs/remote/htdemucs_6s.yaml", 21,
+       "207405151270af8fd81c2373c25d27950916682ac91dca7884a11ce13dad6f58", "models: ['5c90dfd2']")
 FILES_LIST_SHA256 = "7258eee911e5963e6270983d7072832e90e1ed96b25bb26aadf12f9867109bf9"
 README_SHA256 = "59ab8a3595cd5ec8dd853821ca2b377804f397be8467a082920f1c44e0d59d35"
 README_LICENCE_LINE = "Demucs is released under the MIT license as found in the [LICENSE](LICENSE) file."
@@ -51,6 +50,8 @@ def generate_demucs_records(directory):
     if (authority.get("repository"), authority.get("revision"), files) != (REPOSITORY, REVISION, FILES):
         raise ValueError("unexpected Demucs upstream binding")
     if (authority.get("files_list_sha256") != FILES_LIST_SHA256
+            or tuple((authority.get("bag_definition") or {}).get(k)
+                     for k in ("path", "bytes", "sha256", "text")) != BAG
             or authority.get("readme_sha256") != README_SHA256
             or authority.get("readme_licence_line") != README_LICENCE_LINE
             or (authority.get("relicensing") or {}).get("commit") != RELICENSING_COMMIT):

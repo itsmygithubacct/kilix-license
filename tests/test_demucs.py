@@ -51,7 +51,9 @@ class DemucsTerms(unittest.TestCase):
         data = json.loads((DATA_DIR / 'determinations-demucs.json').read_bytes())
         authority = data['authority']
         files = {item['path']: (item['bytes'], item['sha256']) for item in authority['files']}
-        self.assertEqual(files['5c90dfd2-34c22ccb.th'], (54996327, WEIGHTS_SHA256))
+        self.assertEqual(files, {'5c90dfd2-34c22ccb.th': (54996327, WEIGHTS_SHA256)})
+        # htdemucs_6s is that one model with default weights.
+        self.assertEqual(authority['bag_definition']['text'], "models: ['5c90dfd2']")
         # Demucs checks a .th file against the sha256 prefix in its name.
         self.assertTrue(WEIGHTS_SHA256.startswith('34c22ccb'))
         self.assertEqual(authority['revision'], REVISION)
@@ -99,6 +101,8 @@ class DemucsTerms(unittest.TestCase):
                 (lambda v: v['authority'].update(readme_licence_line='Demucs is released under CC BY-NC 4.0.'),
                  'licence evidence'),
                 (lambda v: v['authority'].update(relicensing={}), 'licence evidence'),
+                (lambda v: v['authority']['bag_definition'].update(text="models: ['5c90dfd2', 'x']"),
+                 'licence evidence'),
                 (lambda v: v['authority'].update(licence_sha256='0' * 64), 'not displayed'),
                 (lambda v: v['records'][0].update(licensor='Meta'), 'classification'),
                 (lambda v: v['records'][0].update(decision_class='informational'), 'classification'),
