@@ -47,7 +47,7 @@ class DemucsTerms(unittest.TestCase):
         self.assertTrue(lic.standard_policy_eligible(demucs))
         self.assertEqual(record_path(MODEL_ID).parent.name, 'demucs-records')
 
-    def test_the_determination_pins_the_weights_and_the_owner_request(self):
+    def test_the_determination_pins_the_weights_and_the_owners_determination(self):
         data = json.loads((DATA_DIR / 'determinations-demucs.json').read_bytes())
         authority = data['authority']
         files = {item['path']: (item['bytes'], item['sha256']) for item in authority['files']}
@@ -61,6 +61,11 @@ class DemucsTerms(unittest.TestCase):
                          {'date': '2026-11-08',
                           'words': 'route kilix split properly through kilix-license.'})
         self.assertIn('training data', authority['unproved'])
+        self.assertEqual(authority['owner_record'], {
+            'path': 'licence-evidence-demucs-htdemucs-6s-2026-11-08/OWNER-DETERMINATION-demucs-htdemucs-6s.md',
+            'bytes': 3506,
+            'sha256': 'c58b90a793b5a0866253d5351de0cc61000f05835daf6736a0ae3a2e2e22def0'})
+        self.assertIn('Make it my determination (Recommended)', authority['determined_by'])
 
     def test_the_record_covers_only_its_own_artifact(self):
         index = lic.load_determined_records()
@@ -103,6 +108,9 @@ class DemucsTerms(unittest.TestCase):
                 (lambda v: v['authority'].update(relicensing={}), 'licence evidence'),
                 (lambda v: v['authority']['bag_definition'].update(text="models: ['5c90dfd2', 'x']"),
                  'licence evidence'),
+                (lambda v: v['authority'].pop('owner_record'), "owner's determination"),
+                (lambda v: v['authority']['owner_record'].update(sha256='0' * 64),
+                 "owner's determination"),
                 (lambda v: v['authority'].update(licence_sha256='0' * 64), 'not displayed'),
                 (lambda v: v['records'][0].update(licensor='Meta'), 'classification'),
                 (lambda v: v['records'][0].update(decision_class='informational'), 'classification'),
