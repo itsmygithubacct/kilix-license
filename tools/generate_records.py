@@ -21,6 +21,7 @@ from kilix_license.basic_pitch import generate_basic_pitch_records
 from kilix_license.female02 import generate_female02_records
 from kilix_license.paradee import generate_paradee_records
 from kilix_license.whisper_medium import generate_whisper_medium_records
+from kilix_license.demucs import generate_demucs_records
 from kilix_license.lfm2 import generate_lfm2_records
 from kilix_license.lfm3 import generate_lfm3_records
 from kilix_license.needle3 import generate_needle3_records
@@ -80,6 +81,8 @@ def main(argv: list[str]) -> int:
     paradee_path = directory/'paradee-records'
     whisper_medium_records = generate_whisper_medium_records(directory)
     whisper_medium_path = directory/'whisper-medium-records'
+    demucs_records = generate_demucs_records(directory)
+    demucs_path = directory/'demucs-records'
     if args.check:
         # Read-only (LIC3-3): a missing or changed quote text fails; it is never written.
         check_quote_texts(payload, texts)
@@ -98,6 +101,7 @@ def main(argv: list[str]) -> int:
         check_records(paradee_records,paradee_path)
         check_records(basic_pitch_records,basic_pitch_path)
         check_records(whisper_medium_records,whisper_medium_path)
+        check_records(demucs_records,demucs_path)
         sys.stdout.write(f"records {len(records)} match generator (pin {pin})\n")
         sys.stdout.write(
             f"application records {len(app_records)} match generator (pin {app_pin})\n"
@@ -119,6 +123,7 @@ def main(argv: list[str]) -> int:
     write_records(paradee_records,paradee_path)
     write_records(basic_pitch_records,basic_pitch_path)
     write_records(whisper_medium_records,whisper_medium_path)
+    write_records(demucs_records,demucs_path)
     sys.stdout.write(f"wrote {len(records)} records (pin {pin})\n")
     sys.stdout.write(f"wrote {len(app_records)} application records (pin {app_pin})\n")
     return 0
