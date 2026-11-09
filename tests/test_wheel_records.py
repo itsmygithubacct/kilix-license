@@ -38,6 +38,8 @@ class WheelRecordTests(unittest.TestCase):
         self.assertIn('kilix-female-02', expected_records)
         self.assertIn('paradee-records', families)
         self.assertIn('paradee-8m-v1.2', expected_records)
+        self.assertIn('noloop02-records', families)
+        self.assertIn('qwen-0.8b-no-loop-02', expected_records)
         with tempfile.TemporaryDirectory(prefix='license-wheel-') as temp:
             root = Path(temp)
             # An independent build export; no live tree build/egg-info writes.
@@ -73,6 +75,7 @@ import kilix_license as lic
 records={record.id:record.digest for record in lic.load_determined_records()}
 assert 'kilix-female-02' in records
 assert 'paradee-8m-v1.2' in records
+assert 'qwen-0.8b-no-loop-02' in records
 lic.load_determined_texts(Path(sys.argv[2]))
 print(json.dumps(records,sort_keys=True))
 '''
