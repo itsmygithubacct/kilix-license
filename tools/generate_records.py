@@ -23,6 +23,7 @@ from kilix_license.paradee import generate_paradee_records
 from kilix_license.whisper_medium import generate_whisper_medium_records
 from kilix_license.demucs import generate_demucs_records
 from kilix_license.whisper_large_v3 import generate_whisper_large_v3_records
+from kilix_license.noloop02 import generate_noloop02_records
 from kilix_license.lfm2 import generate_lfm2_records
 from kilix_license.lfm3 import generate_lfm3_records
 from kilix_license.needle3 import generate_needle3_records
@@ -86,6 +87,8 @@ def main(argv: list[str]) -> int:
     demucs_path = directory/'demucs-records'
     whisper_large_v3_records = generate_whisper_large_v3_records(directory)
     whisper_large_v3_path = directory/'whisper-large-v3-records'
+    noloop02_records = generate_noloop02_records(directory)
+    noloop02_path = directory/'noloop02-records'
     if args.check:
         # Read-only (LIC3-3): a missing or changed quote text fails; it is never written.
         check_quote_texts(payload, texts)
@@ -102,6 +105,7 @@ def main(argv: list[str]) -> int:
         check_records(needle3_records,needle3_path)
         check_records(female02_records,female02_path)
         check_records(paradee_records,paradee_path)
+        check_records(noloop02_records,noloop02_path)
         check_records(basic_pitch_records,basic_pitch_path)
         check_records(whisper_medium_records,whisper_medium_path)
         check_records(demucs_records,demucs_path)
@@ -125,6 +129,7 @@ def main(argv: list[str]) -> int:
     write_records(needle3_records,needle3_path)
     write_records(female02_records,female02_path)
     write_records(paradee_records,paradee_path)
+    write_records(noloop02_records,noloop02_path)
     write_records(basic_pitch_records,basic_pitch_path)
     write_records(whisper_medium_records,whisper_medium_path)
     write_records(demucs_records,demucs_path)
