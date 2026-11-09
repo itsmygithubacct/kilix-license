@@ -1,86 +1,98 @@
 # kilix-license
 
-Licence: MIT (OD-AV). LIC3 re-confirms the LICENSE file; remote creation is RC-13.
+The licence authority for Kilix: licence records stored by text digest, the
+verbatim first-use screen, agreement capture, digest-bound receipts and the
+coverage check that every model install must pass.
 
-`kilix-license` is the single licence authority for Kilix (OD-AJ). It
-owns licence records stored by text digest, the verbatim first-use
-screen, agreement capture, digest-bound receipts, and binding-scoped
-`covers` / `require`.
+Pinned in Plebian-OS 0.2.3 as `KILIX_LICENSE_REF` in `releases/0.2.3.env`,
+where the image build reads its records and texts to produce the release's
+model-compliance carrier. On an installed system it runs as the copy that
+[kilix-content](https://github.com/itsmygithubacct/kilix-content#readme)
+vendors under `third_party/kilix-license`, inside Kilix.
 
-The public coverage check is `covers(record, receipt, *, manifest_digest)`.
-The expected manifest is part of the binding (OD-AI); the two-argument
-form is refused. OD-AI's record digest names this licence record, not an
-asset/v3 record. Advisories, statements, and component entries without
-exception text are context (OD-AQ) and are omitted from that digest.
+## What it does
 
-The screen is `render_screen(record, texts, *, receipts, records=None)`.
-It marks every bound text that is "changed since your last acceptance"
-(SR-4): the licence text, a component exception, or a binding condition
-whose text identity an earlier accept receipt accepted with other bytes.
-`receipts` (the `ReceiptStore`) is required, so no consumer can render a
-screen without the marker; the two-argument form is refused. The same
-detection is `changed_texts(record, receipts, *, records=None)`, and
-`scan_receipts(store)` lists the receipt files it used and skipped. A
-binding condition's identity is its generated `text_id`, and a licence
-text's identity is its record's generated `licence_text_id`. Both are keyed
-by the document, not by record or binding id, so they hold across sibling
-records (both Bonsai Image variants, both EnCodec checkpoints) and a
-renamed binding or entry. The generator refuses an identity table that
-gives two texts one identity or one text two identities. The marker never
-grants coverage: `covers` and `require` do not read it. A receipt file that
-cannot be parsed, or has an unknown schema, is skipped for the marker,
-never fatal.
+- Generates `kilix.license.record/v1` licence records from checked
+  determination JSON files under `src/kilix_license/data/`; licence texts are
+  copied byte for byte into `data/texts/`, named by their SHA-256, and never
+  retyped.
+- Renders the first-use screen a user sees before a model is installed, with
+  every stored text printed byte-identical and a marker on any bound text that
+  changed since an earlier acceptance.
+- Captures an agreement: an explicit `yes` or `y` for a licence with binding or
+  restrictive terms (`affirmative`), none for an `informational` one whose
+  terms are shown and recorded.
+- Writes receipts to one shared store and answers whether a receipt covers an
+  exact licence record and model manifest (`covers`, `require`).
+- Records a standard-licence distribution policy for installs that need no
+  typed answer, without claiming human consent.
 
-The scan and `require` read receipt files the same way. Each entry is
-stat'ed before it is opened, so a FIFO, device or directory is never
-opened. The open is `O_NONBLOCK | O_NOCTTY`, and the descriptor must be a
-regular file of at most 1 MiB before one byte is read. Reads stop at
-1 MiB + 1 byte whatever the file's size claims. An entry named like a
-receipt that fails this is not a receipt: `require` refuses with
-`CoverageRefused` and never waits on it.
+Runtime code uses the Python standard library only.
 
-Most bound and context texts are the determinations JSON's own quoted
-spans. One is not: the EnCodec `encodec-licence-history-note` advisory. The
-determinations quote there is OD-AR's builder-facing description of the
-screen, so `ADVISORY_TEXTS` binds the note itself instead - a text vendored
-under `data/texts/` whose quoted lines are copied byte for byte from the
-upstream licence history the L-ENC-R2 evidence packet pins. The generator
-refuses a table entry no determinations quote uses, an entry that is not a
-sha256, and a note that is missing or does not match its digest. An advisory
-is not bound (OD-AQ), so the EnCodec record digests and every receipt's
-coverage are unchanged by it.
+## Quick start
 
-The note tells the user that every line under a "quoted from" header is its
-named source's bytes, so that promise is checked rather than asserted.
-`ADVISORY_TEXT_SOURCES` declares, for each note, which file it quotes, that
-file's sha256 and the exact lines taken; `parse_quoted_blocks` reads the
-same three facts back out of the note's own headers, and the generator
-refuses a note whose headers disagree with the declaration, including a
-header that names one slice while quoting another. Each named source file is
-pinned under `tests/data/note-sources/<sha256>`, and the suite re-derives
-every quoted line from it and compares bytes, using the line numbers the
-note itself claims. Adding or dropping a quoted block is a change to that
-one table: nothing else names the note's sources.
+```python
+from pathlib import Path
+from kilix_license import (AssetRef, ReceiptStore, capture_agreement, load_determined_records,
+                           load_determined_texts, receipt_from_agreement, render_screen, require)
 
-The note's own lines - its preamble and each block's three header lines -
-are the only text in it that upstream did not write, and they may not say
-what a licence is. `states_a_licence` looks for a licence identifier or the
-language of permission and relicensing, and the generator refuses a note
-with such a line outside a quoted block. This is the rule the note exists
-for: licence statements on a first-use screen come from upstream's bytes,
-never from us. An authored line may still introduce, attribute and cite,
-which is where the orientation on a quoted block comes from.
+records = load_determined_records()               # every packaged licence record
+record = records.by_id(record_id)            # a record id from data/*records/
+texts = load_determined_texts(Path(scratch) / "texts")   # copies the texts into a TextStore
+store = ReceiptStore.shared()                     # $GPU_TERMINAL_HOME/license-receipts
+screen = render_screen(record, texts, receipts=store, records=records)   # bytes to show
+agreement = capture_agreement(record, "yes")      # the user's answer, after the screen
+store.write(receipt_from_agreement(record, agreement, manifest_digest=manifest,
+                                   release_digest=release, catalogue_digest=catalogue))
+require(AssetRef(id=asset_id, record_digest=record.digest, manifest_digest=manifest),
+        records=records, store=store)             # raises CoverageRefused when not covered
+```
 
-Each declared source also carries a second, independent witness where one
-exists: the evidence packet's own record of the file, vendored beside it
-under `tests/data/note-sources/packet-records/<source sha256>.json`. The
-suite checks the declared digest and each quoted line against that record,
-and checks that the record's own packet digest is the one the note shows
-the user. That is a partial close, not a full one: the packet records no
-copy of the audiocraft lines, so block 2 has one witness, and both
-witnesses are in this tree. `tools/verify_note_sources.py --packets DIR`
-re-derives both from the evidence packets themselves when they are to
-hand; it takes the directory as an argument and no path is committed.
+In practice a consumer does not call these directly: kilix-content's
+first-use flow (`kilix models install <asset>` in Kilix) and the Kilix model
+wizard (`kilix wizard`) drive them.
+
+## Usage
+
+| Call | What it does |
+|---|---|
+| `load_determined_records()` / `load_determined_texts(dir)` | The packaged records (a `RecordIndex`) and their texts |
+| `render_screen(record, texts, *, receipts, records=None)` | The verbatim first-use screen, with changed-text markers |
+| `changed_texts(record, receipts, *, records=None)`, `scan_receipts(store)` | Which bound texts changed since an earlier acceptance, and which receipt files were read or skipped |
+| `capture_agreement(record, typed_text)` | Agreement for one record; refuses a missing or wrong answer |
+| `capture_standard_policy(record)` | Policy authorization for a standard licence with no extra terms |
+| `receipt_from_agreement(record, agreement, *, manifest_digest, ...)` | A receipt bound to the record and the exact manifest |
+| `ReceiptStore.shared()`, `receipt_store_root()` | The single receipt store and its root |
+| `covers(record, receipt, *, manifest_digest)`, `require(asset, *, records, store)` | Coverage: is there a receipt for this record and manifest |
+
+| Make target | What it does |
+|---|---|
+| `make check` | Sync the frozen environment, run the tests, build and install the wheel, run the advisory-note check when `PACKETS` is set |
+| `make records` | Fail unless the committed records equal the generator's output |
+| `make regenerate` | Write the records from the determinations |
+| `make notes PACKETS=DIR` | Check advisory-note sources against the evidence packets |
+
+## How it works
+
+```
+determinations-*.json ──generate──> data/*records/*.json + data/texts/<sha256>
+                                            │
+consumer (kilix-content, kilix wizard) ─────┤
+   render_screen ──> user answers ──> capture_agreement ──> receipt_from_agreement
+                                            │
+                     ReceiptStore.shared()  ▼  $GPU_TERMINAL_HOME/license-receipts
+                                            │
+   installer ──> require(record digest, manifest digest) ──> install or refuse
+```
+
+A record's digest covers its licence text, bound conditions and component
+exceptions; advisories, statements and component entries without exception
+text are context and stay out of it. A receipt binds that record digest to
+the exact manifest digest of the model it was captured for, so a changed
+licence text or a changed model needs a new receipt. The screen, coverage
+and receipt-file rules are in [docs/records-and-screen.md](docs/records-and-screen.md),
+and the rules for advisory notes shown on a screen are in
+[docs/advisory-notes.md](docs/advisory-notes.md).
 
 ## Where receipts live
 
@@ -188,12 +200,12 @@ RC-13.
 
 ## Publication status
 
-The repository is **local-only**. It has no remote and is not authorised
-for a push or for GitHub repository creation. See `PUBLICATION.md`.
-
-Runtime code uses the Python standard library only.
+Published as `itsmygithubacct/kilix-license`; the disposition is recorded in
+[PUBLICATION.md](PUBLICATION.md). Release pins name exact commits of this
+repository.
 
 ## Development
+
 
 The development environment is frozen to Python 3.12.8 and uv 0.12.5.
 
@@ -220,71 +232,40 @@ exception, which is the same choice the authored-note prose forced. Edit
 the prose and update `README_NORMALISED_SHA256`; the failure prints the
 value to put there.
 
-### Checking an advisory note against the evidence packets
 
-An advisory note's quoted source is pinned twice inside this tree - the
-source file under `tests/data/note-sources/`, and the evidence packet's own
-record of it beside it - so both can be forged together by one seat willing
-to make the edits agree. Only the packets themselves settle it, and they
-are not in this repository:
+## Documentation
 
-```sh
-make notes PACKETS=<directory holding the licence-evidence-* packets>
-```
+| Document | Contents |
+|---|---|
+| [docs/records-and-screen.md](docs/records-and-screen.md) | Coverage, the first-use screen and its changed-text marker, how receipt files are read, yes/no agreement screens |
+| [docs/advisory-notes.md](docs/advisory-notes.md) | Advisory notes: quoted sources, second witnesses, and how to change authored lines |
+| [docs/history.md](docs/history.md) | Earlier publication statements from this README |
+| [PUBLICATION.md](PUBLICATION.md) | Publication disposition |
+| [CHANGELOG.md](CHANGELOG.md) | Record and behaviour changes |
 
-**A release gate runs that, and it must be run before an advisory note's
-digest is re-pinned anywhere downstream.** `make check` reaches it through
-`notes-guarded`, which runs it whenever `PACKETS` is set and prints a
-`notes: SKIPPED` block naming what was not checked when it is not - so a
-gate that omits the second witness says so rather than passing quietly.
+## Related repositories
 
-### Changing what this authority says on a consent screen
+- [kilix-content](https://github.com/itsmygithubacct/kilix-content#readme):
+  vendors this authority and runs the first-use flow for every catalog model.
+- [kilix](https://github.com/itsmygithubacct/kilix#readme): `kilix models`
+  and the model wizard present the screens this authority renders.
+- [plebian-os](https://github.com/itsmygithubacct/plebian-os#readme): pins
+  this repository and builds the release's model-compliance carrier from it.
 
-An advisory note has two kinds of line. Lines under a `quoted from` header
-are re-derived from their named source byte for byte. Every other line -
-the preamble, and each block's three header lines - is **authored**, and is
-**pinned, not screened**: it must appear byte for byte in
-`ADVISORY_NOTE_AUTHORED` in `src/kilix_license/generate.py`, keyed by the
-note's sha256. Screening authored prose for licence vocabulary could not
-work, because a false sentence can be written in plain English; the
-constraint is equality with a declaration, so a new or altered authored
-sentence is refused whatever it says.
+## Part of Plebian-OS
 
-The declaration is itself pinned, by a digest typed beside it in
-`ADVISORY_NOTE_AUTHORED_PIN`. Without that, the declaration could be made to
-derive from the note file - and then the note would be compared with itself,
-the suite would stay green, and a new sentence would reach a consent screen
-with nothing in the diff to read. The pin is typed and never computed, and
-the suite requires the declaration to be a literal in the source, so a
-computed declaration is refused rather than satisfied.
+kilix-license is one of the repositories behind
+[Plebian-OS](https://github.com/itsmygithubacct/plebian-os#readme), a Debian
+install whose desktop is [Kilix](https://github.com/itsmygithubacct/kilix#readme)
+running the [Kilix 95](https://github.com/itsmygithubacct/kilix-95#readme)
+desktop through [Pleb](https://github.com/itsmygithubacct/pleb#readme).
+It is pinned in the release environment for the image's model-compliance
+carrier and reaches users as the copy vendored inside kilix-content. The map
+of every repository and how it ships is on the
+[components page](https://github.com/itsmygithubacct/plebian-os/blob/main/docs/components.md).
 
-To change it deliberately, in one place:
+## License
 
-1. edit the note under `src/kilix_license/data/texts/` and rename it to its
-   new sha256;
-2. copy its authored lines - in note order, blank lines omitted - into
-   `ADVISORY_NOTE_AUTHORED` under the new digest, and put the declaration's
-   own sha256 in `ADVISORY_NOTE_AUTHORED_PIN` beside it **and** in
-   `AUTHORED_PIN` in `tests/test_records.py`, the suite's independently
-   typed copy of the same figure (every refusal prints the value);
-3. point `ADVISORY_TEXTS` and `ADVISORY_TEXT_SOURCES` at the new digest;
-4. run `make regenerate`, which **writes** the records - `make records` is
-   `--check` and refuses until they are written;
-5. `git add -A`, because three tests read the committed tree and the renamed
-   note is a new path, then run `make check`.
+Licence: MIT (OD-AV). LIC3 re-confirms the LICENSE file; remote creation is RC-13.
 
-The generator's refusals state those five steps, including the two an editor
-meets first: the digest mismatch before the rename, and the missing file just
-after it. Widening a detector is not an alternative: a sentence absent from
-that declaration never reaches a user.
-
-### Yes/no agreement screens
-
-Consumers may show the full licence and binding conditions, name the affected
-models, then ask for an explicit `yes` or `y` (default No). Pass that actual
-answer to `capture_agreement`; do not manufacture an exact agreement phrase.
-The legacy exact-line API remains supported. Receipts retain their existing
-record, manifest, binding-text and capture-time identities. A batch consumer
-may share one affirmative answer across the records actually presented in
-that group, while emitting a separate receipt for each exact model manifest.
-Declining or closing the screen must not call receipt creation for that group.
+See [LICENSE](LICENSE).
