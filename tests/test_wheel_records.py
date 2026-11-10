@@ -44,6 +44,8 @@ class WheelRecordTests(unittest.TestCase):
         self.assertIn('demucs-htdemucs-6s', expected_records)
         self.assertIn('whisper-large-v3-records', families)
         self.assertIn('faster-whisper-large-v3', expected_records)
+        self.assertIn('en-core-web-sm-records', families)
+        self.assertIn('en-core-web-sm-3.8.0', expected_records)
         self.assertIn('noloop02-records', families)
         self.assertIn('qwen-0.8b-no-loop-02', expected_records)
         with tempfile.TemporaryDirectory(prefix='license-wheel-') as temp:
@@ -84,6 +86,7 @@ assert 'paradee-8m-v1.2' in records
 assert 'faster-whisper-medium-en' in records
 assert 'demucs-htdemucs-6s' in records
 assert 'faster-whisper-large-v3' in records
+assert 'en-core-web-sm-3.8.0' in records
 assert 'qwen-0.8b-no-loop-02' in records
 lic.load_determined_texts(Path(sys.argv[2]))
 print(json.dumps(records,sort_keys=True))

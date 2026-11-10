@@ -18,6 +18,7 @@ if str(SRC) not in sys.path:
 
 from kilix_license.errors import HandEditedRecord  # noqa: E402
 from kilix_license.basic_pitch import generate_basic_pitch_records
+from kilix_license.en_core_web_sm import generate_en_core_web_sm_records
 from kilix_license.female02 import generate_female02_records
 from kilix_license.paradee import generate_paradee_records
 from kilix_license.whisper_medium import generate_whisper_medium_records
@@ -77,6 +78,8 @@ def main(argv: list[str]) -> int:
     needle3_path = directory/'needle3-records'
     basic_pitch_records = generate_basic_pitch_records(directory)
     basic_pitch_path = directory/'basic-pitch-records'
+    en_core_web_sm_records = generate_en_core_web_sm_records(directory)
+    en_core_web_sm_path = directory/'en-core-web-sm-records'
     female02_records = generate_female02_records(directory)
     female02_path = directory/'female02-records'
     paradee_records = generate_paradee_records(directory)
@@ -107,6 +110,7 @@ def main(argv: list[str]) -> int:
         check_records(paradee_records,paradee_path)
         check_records(noloop02_records,noloop02_path)
         check_records(basic_pitch_records,basic_pitch_path)
+        check_records(en_core_web_sm_records,en_core_web_sm_path)
         check_records(whisper_medium_records,whisper_medium_path)
         check_records(demucs_records,demucs_path)
         check_records(whisper_large_v3_records,whisper_large_v3_path)
@@ -131,6 +135,7 @@ def main(argv: list[str]) -> int:
     write_records(paradee_records,paradee_path)
     write_records(noloop02_records,noloop02_path)
     write_records(basic_pitch_records,basic_pitch_path)
+    write_records(en_core_web_sm_records,en_core_web_sm_path)
     write_records(whisper_medium_records,whisper_medium_path)
     write_records(demucs_records,demucs_path)
     write_records(whisper_large_v3_records,whisper_large_v3_path)
