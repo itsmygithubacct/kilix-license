@@ -21,6 +21,7 @@ from kilix_license.basic_pitch import generate_basic_pitch_records
 from kilix_license.en_core_web_sm import generate_en_core_web_sm_records
 from kilix_license.female02 import generate_female02_records
 from kilix_license.paradee import generate_paradee_records
+from kilix_license.pp_ocrv6_small import generate_pp_ocrv6_small_records
 from kilix_license.whisper_medium import generate_whisper_medium_records
 from kilix_license.demucs import generate_demucs_records
 from kilix_license.whisper_large_v3 import generate_whisper_large_v3_records
@@ -80,6 +81,8 @@ def main(argv: list[str]) -> int:
     basic_pitch_path = directory/'basic-pitch-records'
     en_core_web_sm_records = generate_en_core_web_sm_records(directory)
     en_core_web_sm_path = directory/'en-core-web-sm-records'
+    pp_ocrv6_small_records = generate_pp_ocrv6_small_records(directory)
+    pp_ocrv6_small_path = directory/'pp-ocrv6-small-records'
     female02_records = generate_female02_records(directory)
     female02_path = directory/'female02-records'
     paradee_records = generate_paradee_records(directory)
@@ -111,6 +114,7 @@ def main(argv: list[str]) -> int:
         check_records(noloop02_records,noloop02_path)
         check_records(basic_pitch_records,basic_pitch_path)
         check_records(en_core_web_sm_records,en_core_web_sm_path)
+        check_records(pp_ocrv6_small_records,pp_ocrv6_small_path)
         check_records(whisper_medium_records,whisper_medium_path)
         check_records(demucs_records,demucs_path)
         check_records(whisper_large_v3_records,whisper_large_v3_path)
@@ -136,6 +140,7 @@ def main(argv: list[str]) -> int:
     write_records(noloop02_records,noloop02_path)
     write_records(basic_pitch_records,basic_pitch_path)
     write_records(en_core_web_sm_records,en_core_web_sm_path)
+    write_records(pp_ocrv6_small_records,pp_ocrv6_small_path)
     write_records(whisper_medium_records,whisper_medium_path)
     write_records(demucs_records,demucs_path)
     write_records(whisper_large_v3_records,whisper_large_v3_path)

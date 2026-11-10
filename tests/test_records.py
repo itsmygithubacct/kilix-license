@@ -713,7 +713,7 @@ class LicenceTextIdentityTests(unittest.TestCase):
         from kilix_license.lfm2 import LICENCE_TEXT_IDS as LFM_TEXT_IDS
         from kilix_license.lfm3 import LICENCE_TEXT_IDS as LFM3_TEXT_IDS
         from kilix_license.needle3 import LICENCE_TEXT_IDS as NEEDLE_TEXT_IDS
-        tables = {**LICENCE_TEXT_IDS, **APP_LICENCE_TEXT_IDS, **DIA_TEXT_IDS, **LFM_TEXT_IDS, **LFM3_TEXT_IDS, **NEEDLE_TEXT_IDS, "kilix-female-02": "debian/common-licenses/Apache-2.0", "paradee-8m-v1.2": "debian/common-licenses/Apache-2.0", "qwen-0.8b-no-loop-02": "debian/common-licenses/Apache-2.0", "basic-pitch-icassp-2022-onnx": "github.com/spotify/basic-pitch/LICENSE", "faster-whisper-medium-en": "kilix/config/model_notices#whisper", "demucs-htdemucs-6s": "github.com/adefossez/demucs/LICENSE", "faster-whisper-large-v3": "kilix/config/model_notices#whisper", "en-core-web-sm-3.8.0": "github.com/explosion/spacy-models/en_core_web_sm-3.8.0/LICENSE"}
+        tables = {**LICENCE_TEXT_IDS, **APP_LICENCE_TEXT_IDS, **DIA_TEXT_IDS, **LFM_TEXT_IDS, **LFM3_TEXT_IDS, **NEEDLE_TEXT_IDS, "kilix-female-02": "debian/common-licenses/Apache-2.0", "paradee-8m-v1.2": "debian/common-licenses/Apache-2.0", "qwen-0.8b-no-loop-02": "debian/common-licenses/Apache-2.0", "basic-pitch-icassp-2022-onnx": "github.com/spotify/basic-pitch/LICENSE", "faster-whisper-medium-en": "kilix/config/model_notices#whisper", "demucs-htdemucs-6s": "github.com/adefossez/demucs/LICENSE", "faster-whisper-large-v3": "kilix/config/model_notices#whisper", "en-core-web-sm-3.8.0": "github.com/explosion/spacy-models/en_core_web_sm-3.8.0/LICENSE", "pp-ocrv6-small-det": "debian/common-licenses/Apache-2.0", "pp-ocrv6-small-rec": "debian/common-licenses/Apache-2.0"}
         for record in load_determined_records():
             with self.subTest(committed=record.id):
                 self.assertEqual(record.licence_text_id, tables[record.id])
@@ -1611,7 +1611,7 @@ class ApplicationAuthorityTests(unittest.TestCase):
         ids = {record.id for record in index}
         self.assertEqual(ids, {r.id for r in self.release} | {r.id for r in self.apps}
                          | {r.id for r in generate_diarization_records(DATA)}
-                         | {'lfm2-kilix-commands', 'lfm3-kilix-commands', 'needle3-kilix-commands', 'kilix-female-02', 'paradee-8m-v1.2', 'qwen-0.8b-no-loop-02', 'basic-pitch-icassp-2022-onnx', 'faster-whisper-medium-en', 'demucs-htdemucs-6s', 'faster-whisper-large-v3', 'en-core-web-sm-3.8.0'})
+                         | {'lfm2-kilix-commands', 'lfm3-kilix-commands', 'needle3-kilix-commands', 'kilix-female-02', 'paradee-8m-v1.2', 'qwen-0.8b-no-loop-02', 'basic-pitch-icassp-2022-onnx', 'faster-whisper-medium-en', 'demucs-htdemucs-6s', 'faster-whisper-large-v3', 'en-core-web-sm-3.8.0', 'pp-ocrv6-small-det', 'pp-ocrv6-small-rec'})
         for record in self.apps:
             self.assertEqual(render_record_bytes(index.by_id(record.id)),
                              render_record_bytes(record))
