@@ -11,6 +11,13 @@ DIST ?= dist
 # looks like a defect and is not one. Run a sandboxed gate as
 # `make check OFFLINE=1`, with the backend already in $(UV_CACHE_DIR).
 # The default is unchanged: a cold checkout can still fetch and build.
+#
+# tests/test_wheel_records.py builds the wheel with the same backend, through
+# setuptools.build_meta in the test interpreter. The project venv holds no
+# setuptools, so `test` adds it from the same requirement. pyproject.toml is
+# vendored by kilix-content and this Makefile is not, so the requirement is
+# repeated here rather than added to pyproject.toml.
+BUILD_BACKEND ?= setuptools>=77
 OFFLINE ?=
 ifeq ($(OFFLINE),1)
 export UV_OFFLINE := 1
@@ -46,7 +53,7 @@ test:
 	PYTHONPATH="src:tests/support" \
 	UV_PYTHON_INSTALL_DIR="$(UV_PYTHON_INSTALL_DIR)" \
 	UV_CACHE_DIR="$(UV_CACHE_DIR)" \
-	$(UV) run --frozen --no-sync --python $(PYTHON_VERSION) \
+	$(UV) run --frozen --no-sync --with '$(BUILD_BACKEND)' --python $(PYTHON_VERSION) \
 		python -m unittest discover -s tests -v
 
 # The gate must fail on a packaging defect. `test` runs against PYTHONPATH=src
