@@ -15,6 +15,30 @@ from kilix_license.demucs import (
 
 # kilix-license before this family existed.
 BASE = '7c70078f8da3d21cc0ee9d0e9a0a133a06bc1a42'
+
+
+# The lfm2-kilix-commands record names its delivery's modified-model notice.
+# Delivery lfm2-kilix-commands-20261115-v10 replaced that one statement text
+# (2026-11-15). Nothing else about the LFM2 terms may differ from the base.
+LFM2_NOTICE = {
+    'src/kilix_license/data/determinations-lfm2.json',
+    'src/kilix_license/data/determinations-lfm2.sha256',
+    'src/kilix_license/data/lfm2-records/lfm2-kilix-commands.json',
+}
+LFM2_NOTICE_KEYS = ('determinations_sha256',)
+
+
+def lfm2_terms(raw):
+    """An LFM2 determination or record with its notice statement digest masked."""
+    value = json.loads(raw)
+    records = value['records'] if 'records' in value else [value]
+    for record in records:
+        for key in LFM2_NOTICE_KEYS:
+            record.pop(key, None)
+        statements = record['statements']
+        assert [item['id'] for item in statements] == ['modified-model']
+        statements[0]['text_sha256'] = 'masked'
+    return value
 WEIGHTS_SHA256 = '34c22ccb381c6f9fdbf324f04e1e2fe21aaaf293f5ded163a162697ff9a02ddd'
 
 
@@ -176,4 +200,8 @@ class DemucsTerms(unittest.TestCase):
             if name in medium_distribution:
                 continue
             original = subprocess.check_output(['git', 'show', f'{BASE}:{name}'], cwd=root)
+            if name in LFM2_NOTICE:
+                if name.endswith('.json'):
+                    self.assertEqual(lfm2_terms((root / name).read_bytes()), lfm2_terms(original), name)
+                continue
             self.assertEqual((root / name).read_bytes(), original, name)
