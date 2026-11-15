@@ -26,6 +26,25 @@ LFM2_NOTICE = {
     'src/kilix_license/data/lfm2-records/lfm2-kilix-commands.json',
 }
 LFM2_NOTICE_KEYS = ('determinations_sha256',)
+# The exact values that replaced the base ones. Any other statement text or
+# determination file fails here, so the carve-out admits this change only.
+LFM2_STATEMENT = 'ad951c9680c6bcb084a38582514b75ae90e0b85fd022495b4a38d2a6c6810a0f'
+LFM2_DETERMINATION_SHA256 = '144cbb3ec61977490773a536c3d0824dbcaa99cfe8498b6ffb68c325f5592e77'
+
+
+def lfm2_pinned(root, name):
+    """Whether a moved LFM2 file holds exactly the pinned new values."""
+    import hashlib
+    determination = root / 'src/kilix_license/data/determinations-lfm2.json'
+    if hashlib.sha256(determination.read_bytes()).hexdigest() != LFM2_DETERMINATION_SHA256:
+        return False
+    if name.endswith('.sha256'):
+        return (root / name).read_text().split()[:1] == [LFM2_DETERMINATION_SHA256]
+    value = json.loads((root / name).read_bytes())
+    records = value['records'] if 'records' in value else [value]
+    return all([item['text_sha256'] for item in record['statements']] == [LFM2_STATEMENT]
+               and record.get('determinations_sha256', LFM2_DETERMINATION_SHA256)
+               == LFM2_DETERMINATION_SHA256 for record in records)
 
 
 def lfm2_terms(raw):
@@ -201,6 +220,7 @@ class DemucsTerms(unittest.TestCase):
                 continue
             original = subprocess.check_output(['git', 'show', f'{BASE}:{name}'], cwd=root)
             if name in LFM2_NOTICE:
+                self.assertTrue(lfm2_pinned(root, name), name)
                 if name.endswith('.json'):
                     self.assertEqual(lfm2_terms((root / name).read_bytes()), lfm2_terms(original), name)
                 continue
